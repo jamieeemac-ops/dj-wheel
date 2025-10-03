@@ -357,13 +357,15 @@
       if (sessionId) setupChannel();
     })();
   </script>
-
-  <!-- Optional runtime env injection from Netlify -->
-  <script>
-    window.SUPABASE_URL = window.SUPABASE_URL || "";
-    window.SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
-    window.BASE_URL = window.BASE_URL || location.origin;
-  </script>
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script>
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.init({
+      appId: "5060d504-c36b-4330-a408-b905427c79a0",
+    });
+  });
+</script>
 </body>
 </html>
 
