@@ -5,23 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0b0b0b" />
   <link rel="manifest" href="/manifest.json" />
-  <title>DJ Rotation Wheel</title>
-  <script src="https://cdn.onesignal.com/sdks/OneSignalSDK.js" async></script>
+  <title>DJ Wheel — Realtime</title>
   <style>
     :root { --wheel-size: 340px; --bg:#0b0b0b; --card:#121212; --muted:#9aa0a6; --text:#e8eaed; }
-    * { box-sizing: border-box; }
+    * { box-sizing:border-box; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:var(--bg); color:var(--text); }
-    header { padding:12px 16px; background:#0b0b0b; border-bottom:1px solid #1f1f1f; display:flex; gap:10px; align-items:center; justify-content:space-between; position:sticky; top:0; }
-    h1 { margin:0; font-size:18px; font-weight:700; }
+    header { padding:12px 16px; border-bottom:1px solid #1f1f1f; display:flex; gap:10px; align-items:center; justify-content:space-between; position:sticky; top:0; background:#0b0b0b; }
+    h1 { margin:0; font-size:18px; font-weight:800; }
     main { padding:16px; display:grid; gap:16px; max-width:1080px; margin:0 auto; }
     .panel { background:var(--card); border:1px solid #1f1f1f; border-radius:14px; padding:12px; }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     input[type="text"], select, input[type="color"] { padding:10px 12px; border-radius:10px; border:1px solid #2a2a2a; background:#0d0d0d; color:#fff; }
     button { padding:10px 14px; border:0; border-radius:10px; background:#fff; color:#000; font-weight:700; cursor:pointer; }
     button.secondary { background:#1a1a1a; color:#e8eaed; border:1px solid #2a2a2a; }
-    small.muted { color: var(--muted); }
-    .grid { display:grid; gap:14px; grid-template-columns: 1fr; }
-    @media (min-width: 980px) { .grid-2 { grid-template-columns: 1.1fr 0.9fr; } }
+    small.muted { color:var(--muted); }
+    .grid { display:grid; gap:14px; grid-template-columns:1fr; }
+    @media (min-width:980px){ .grid-2 { grid-template-columns: 1.1fr 0.9fr; } }
 
     /* Wheel */
     .wheel-wrap { position:relative; width:var(--wheel-size); height:var(--wheel-size); margin:0 auto; }
@@ -32,14 +31,15 @@
     .names-layer { position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; z-index:2; }
     .name-tag { position:absolute; font-size:12px; font-weight:700; background:rgba(0,0,0,.55); padding:4px 6px; border-radius:6px; transform-origin: 50% calc(var(--wheel-size) * -0.34); color:#fff; display:flex; align-items:center; gap:6px; }
     .name-tag .avatar { font-size:16px; }
-    .pill { padding:6px 10px; border-radius:999px; background:#151515; border:1px solid #2a2a2a; font-size:12px; }
     .list { display:grid; gap:8px; }
     .item { background:#0f0f0f; border:1px solid #222; padding:10px; border-radius:10px; display:flex; align-items:center; justify-content:space-between; }
+    .pill { padding:6px 10px; border-radius:999px; background:#151515; border:1px solid #2a2a2a; font-size:12px; }
+    .timer { font-variant-numeric: tabular-nums; font-weight:800; }
   </style>
 </head>
 <body>
   <header>
-    <h1>DJ Wheel</h1>
+    <h1>DJ Wheel — Realtime</h1>
     <div class="row">
       <button class="secondary" id="installBtn" hidden>Install</button>
       <button class="secondary" id="copyLinkBtn">Copy Link</button>
@@ -58,7 +58,8 @@
             <div>
               <div class="pill">Next Up</div>
               <h2 id="nextName">—</h2>
-              <small class="muted" id="turnInfo">Tracks: 0/1</small>
+              <small class="muted">Tracks: <span id="turnInfo">0/1</span></small><br/>
+              <small class="muted">Timer: <span class="timer" id="timer">08:00</span></small>
             </div>
           </div>
           <div id="namesLayer" class="names-layer"></div>
@@ -67,6 +68,7 @@
 
       <div class="row" style="justify-content:center; margin-top:12px;">
         <button id="handOverBtn">Hand Over</button>
+        <button class="secondary" id="stillBtn">Still Mixing (+8m)</button>
         <button class="secondary" id="resetBtn">Reset Turn</button>
         <button class="secondary" id="removeActiveBtn">Remove Active</button>
       </div>
@@ -79,17 +81,13 @@
             <option value="3">3</option>
           </select>
         </label>
-        <span class="pill">8-min checks • 60s grace → auto-advance</span>
-      </div>
-      <div style="margin-top:10px;">
-        <small class="muted">Tip: Open in Safari → Share → <b>Add to Home Screen</b> → open from icon → Allow notifications for Lock Screen actions.</small>
+        <span class="pill">Realtime sync via Supabase • No DB required</span>
       </div>
     </section>
 
-    <!-- Profiles & Session -->
+    <!-- Roster -->
     <section class="panel">
-      <h2 style="margin:6px 0 12px 0;">Profiles & Session</h2>
-
+      <h2 style="margin:6px 0 12px 0;">Players</h2>
       <div class="row">
         <input id="profileName" type="text" placeholder="Your DJ name" />
         <select id="avatarPick" title="Avatar">
@@ -102,347 +100,158 @@
           <option value="wizard">🧙‍♂️ Wizard</option>
         </select>
         <input id="colorPick" type="color" value="#b14cff" />
-        <button id="saveProfileBtn">Save Profile</button>
+        <button id="joinBtn">Join / Update</button>
       </div>
-      <small class="muted">Your profile (name, avatar, colour) is shared in sessions. Cumulative stats saved server-side.</small>
+      <small class="muted">First person to tap “New Session” becomes Host. Others join with the link; Host manages order.</small>
 
-      <div class="row" style="margin-top:10px;">
-        <button id="joinSessionBtn">Join Session</button>
-        <button class="secondary" id="leaveSessionBtn">Leave</button>
-        <button class="secondary" id="addAfterBtn">Add Me After Active</button>
-      </div>
-
-      <div class="row" style="margin-top:6px;">
-        <span class="muted">Session ID:</span>
-        <code id="sessionIdLabel" style="font-size:12px;"></code>
-      </div>
-
-      <h3 style="margin:12px 0 8px 0;">Participants</h3>
+      <h3 style="margin:12px 0 8px 0;">Current Lineup</h3>
       <div id="participantsList" class="list"></div>
-
-      <h3 style="margin:12px 0 8px 0;">My Stats</h3>
-      <div id="myStats" class="list"></div>
     </section>
   </main>
 
   <script type="module">
-    // ---------- ENV (replace or use Netlify env injection) ----------
+    // ----- ENV -----
     const ENV = {
       SUPABASE_URL:  window.SUPABASE_URL  || "YOUR_SUPABASE_URL",
       SUPABASE_ANON_KEY: window.SUPABASE_ANON_KEY || "YOUR_SUPABASE_ANON_KEY",
-      ONESIGNAL_APP_ID: "YOUR_ONESIGNAL_APP_ID",
       BASE_URL: window.BASE_URL || window.location.origin
     };
 
-    // ---------- Libs ----------
+    // ----- Libs -----
     import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-    // ---------- Supabase ----------
-    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, {
-      auth: { persistSession: true, autoRefreshToken: true }
-    });
+    // ----- Supabase Realtime -----
+    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, { auth: { persistSession: true } });
 
-    // ---------- PWA install ----------
-    let deferredPrompt;
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault(); deferredPrompt = e;
-      document.getElementById('installBtn').hidden = false;
-    });
-    document.getElementById('installBtn').onclick = async () => {
-      if (!deferredPrompt) return; deferredPrompt.prompt();
-      await deferredPrompt.userChoice; deferredPrompt = null;
-      document.getElementById('installBtn').hidden = true;
-    };
-
-    // ---------- OneSignal (Lock Screen actions) ----------
-    let oneSignalPlayerId = null;
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    OneSignalDeferred.push(async function(OneSignal) {
-      await OneSignal.init({ appId: ENV.ONESIGNAL_APP_ID });
-      try {
-        // Ask a gentle prompt only after user interacts (Save Profile/join)
-        oneSignalPlayerId = await OneSignal.getUserId();
-      } catch {}
-    });
-
-    // ---------- App state ----------
+    // ----- Local state -----
     const AVATAR_EMOJI = { ninja:'🥷', robot:'🤖', demon:'😈', angel:'😇', alien:'👽', pirate:'🏴‍☠️', wizard:'🧙‍♂️' };
-    const LS_PROFILE = "djw_profile_v1";
-    let profile = JSON.parse(localStorage.getItem(LS_PROFILE) || "null") || {
-      id: crypto.randomUUID(), name: "", avatar: "ninja", color: "#b14cff",
-      stats: { totalTracks: 0, sessions: 0 }
+    const LS = "djwheel_rt_v1";
+    let me = JSON.parse(localStorage.getItem(LS) || "null") || {
+      id: crypto.randomUUID(), name: "", avatar: "ninja", color: "#b14cff"
     };
 
-    let sessionId = getSessionIdFromPath();
-    const sessionIdLabel = document.getElementById('sessionIdLabel');
-    sessionIdLabel.textContent = sessionId || "(none)";
+    let sessionId = getSessionIdFromPath(); // /s/:id or null
+    let hostId = null; // chosen by first to create the session
+    let state = { participants: [], active_index: 0, tracks_per_turn: 1, tracks_this_turn: 0, timer_ms: 8*60*1000, phase:"idle" };
 
-    let localState = {
-      participants: [], // {profile_id, position, name, avatar, color}
-      active_index: 0, tracks_per_turn: 1, tracks_this_turn: 0
-    };
-    let unsubRealtime = null;
+    // UI refs
+    const $ = (id)=>document.getElementById(id);
+    const wheelEl=$('wheel'), namesLayer=$('namesLayer'), nextNameEl=$('nextName'),
+          turnInfoEl=$('turnInfo'), timerEl=$('timer');
 
-    // ---------- UI bindings ----------
-    const $ = (id) => document.getElementById(id);
-    const nextNameEl = $('nextName'), turnInfoEl = $('turnInfo');
-    const wheelEl = $('wheel'), namesLayer = $('namesLayer');
+    // Channel (created after sessionId exists)
+    let channel = null;
 
-    $('saveProfileBtn').onclick = async () => {
-      profile.name = $('profileName').value.trim() || "DJ";
-      profile.avatar = $('avatarPick').value;
-      profile.color = $('colorPick').value;
-      localStorage.setItem(LS_PROFILE, JSON.stringify(profile));
-      await upsertProfile();
-      renderParticipants(); renderMyStats(); renderWheel();
-    };
+    // ----- PWA install -----
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt = e; $('installBtn').hidden=false; });
+    $('installBtn').onclick = async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; $('installBtn').hidden=true; };
 
-    $('newSessionBtn').onclick = async () => {
-      const { data, error } = await supabase.from('sessions').insert({ tracks_per_turn: 1 }).select().single();
-      if (error) return alert("Failed to create session: " + error.message);
-      sessionId = data.id;
-      history.replaceState(null, "", `/s/${sessionId}`);
-      sessionIdLabel.textContent = sessionId;
-      await followSessionRealtime();
-      showToast("Session created — share the link");
-    };
-
-    $('copyLinkBtn').onclick = async () => {
-      if (!sessionId) return alert("Create or open a session first.");
-      await navigator.clipboard.writeText(`${ENV.BASE_URL}/s/${sessionId}`);
-      showToast("Link copied");
-    };
-
-    $('joinSessionBtn').onclick = async () => {
-      if (!sessionId) return alert("Open a session link first.");
-      await upsertProfile();
-      const exists = localState.participants.some(p => p.profile_id === profile.id);
-      if (!exists) {
-        const pos = (localState.participants.length === 0) ? 0 : localState.active_index + 1;
-        await supabase.from('session_participants').insert({ session_id: sessionId, profile_id: profile.id, position: pos });
-      }
-      showToast("Joined session");
-    };
-
-    $('leaveSessionBtn').onclick = async () => {
-      if (!sessionId) return;
-      await supabase.from('session_participants').delete().eq('session_id', sessionId).eq('profile_id', profile.id);
-      showToast("Left session");
-    };
-
-    $('addAfterBtn').onclick = async () => {
-      if (!sessionId) return;
-      await upsertProfile();
-      const pos = localState.active_index + 1;
-      await supabase.from('session_participants').insert({ session_id: sessionId, profile_id: profile.id, position: pos });
-      showToast("Added after active DJ");
-    };
-
-    $('removeActiveBtn').onclick = async () => {
-      if (!sessionId) return;
-      const active = localState.participants[localState.active_index];
-      if (!active) return;
-      await supabase.from('session_participants').delete().eq('session_id', sessionId).eq('profile_id', active.profile_id);
-      await fetch('/.netlify/functions/handOver', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sessionId }) });
-    };
-
-    $('tracksPerTurn').onchange = async (e) => {
-      const v = parseInt(e.target.value || "1", 10);
-      await supabase.from('sessions').update({ tracks_per_turn: v, tracks_this_turn: 0 }).eq('id', sessionId);
-    };
-
-    $('handOverBtn').onclick = async () => {
-      if (!sessionId) return;
-      await fetch('/.netlify/functions/handOver', {
-        method: 'POST', headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ sessionId })
-      });
-    };
-
-    $('resetBtn').onclick = async () => {
-      if (!sessionId) return;
-      await supabase.from('sessions').update({ tracks_this_turn: 0 }).eq('id', sessionId);
-    };
-
-    // ---------- Helpers ----------
-    function saveProfileUI(){
-      $('profileName').value = profile.name || "";
-      $('avatarPick').value = profile.avatar || "ninja";
-      $('colorPick').value = profile.color || "#b14cff";
-    }
-    saveProfileUI();
-
-    async function upsertProfile(){
-      await supabase.from('profiles').upsert({ id: profile.id, name: profile.name || "DJ", avatar: profile.avatar, color: profile.color });
-      // OneSignal playerId stored per-session so the right device gets the ping
-      if (oneSignalPlayerId && sessionId) {
-        await supabase.from('session_stats').upsert({ session_id: sessionId, profile_id: profile.id, tracks: 0, player_id: oneSignalPlayerId });
+    // ----- Helpers -----
+    function getSessionIdFromPath(){ const m=location.pathname.match(/\/s\/([0-9a-fA-F-]+)/); return m?m[1]:null; }
+    function saveMe(){ localStorage.setItem(LS, JSON.stringify(me)); }
+    function isHost(){ return me.id === hostId; }
+    function broadcast(type, payload){ channel?.send({ type:'broadcast', event:type, payload }); }
+    function pickHostIfNeeded(){
+      // Host is the smallest UUID among present users (deterministic), or existing host
+      const ids = state.participants.map(p=>p.id);
+      if (!hostId || !ids.includes(hostId)) {
+        hostId = ids.slice().sort()[0] || me.id;
       }
     }
 
-    async function followSessionRealtime(){
-      if (!sessionId) return;
-      unsubRealtime && unsubRealtime();
-
-      // Initial load
-      const { data: session } = await supabase.from('sessions').select('*').eq('id', sessionId).single();
-      if (!session) return;
-      localState.active_index = session.active_index || 0;
-      localState.tracks_per_turn = session.tracks_per_turn || 1;
-      localState.tracks_this_turn = session.tracks_this_turn || 0;
-
-      const { data: parts } = await supabase
-        .from('session_participants')
-        .select('profile_id, position, profiles(name, avatar, color)')
-        .eq('session_id', sessionId)
-        .order('position', { ascending:true });
-
-      localState.participants = (parts || []).map(p => ({
-        profile_id: p.profile_id,
-        position: p.position,
-        name: p.profiles?.name || "DJ",
-        avatar: p.profiles?.avatar || "ninja",
-        color: p.profiles?.color || "#7777ff"
-      }));
-
-      renderParticipants(); renderWheel(); renderMyStats();
-
-      // Realtime
-      const ch = supabase.channel('sess_' + sessionId)
-        .on('postgres_changes', { event:'*', schema:'public', table:'sessions', filter:`id=eq.${sessionId}` }, payload => {
-          const r = payload.new;
-          localState.active_index = r.active_index || 0;
-          localState.tracks_per_turn = r.tracks_per_turn || 1;
-          localState.tracks_this_turn = r.tracks_this_turn || 0;
-          renderWheel();
-        })
-        .on('postgres_changes', { event:'*', schema:'public', table:'session_participants', filter:`session_id=eq.${sessionId}` }, async () => {
-          const { data: parts } = await supabase
-            .from('session_participants')
-            .select('profile_id, position, profiles(name, avatar, color)')
-            .eq('session_id', sessionId)
-            .order('position', { ascending:true });
-          localState.participants = (parts || []).map(p => ({
-            profile_id: p.profile_id,
-            position: p.position,
-            name: p.profiles?.name || "DJ",
-            avatar: p.profiles?.avatar || "ninja",
-            color: p.profiles?.color || "#7777ff"
-          }));
-          renderParticipants(); renderWheel();
-        })
-        .subscribe();
-
-      unsubRealtime = () => supabase.removeChannel(ch);
-    }
-
+    // ----- Wheel render -----
     function renderWheel(){
-      const ids = localState.participants;
+      const ids = state.participants;
       if (!ids.length){
         wheelEl.style.background = 'conic-gradient(#333 0 360deg)';
-        namesLayer.innerHTML = '';
-        nextNameEl.textContent = '—';
-        turnInfoEl.textContent = `Tracks: 0/${localState.tracks_per_turn}`;
-        return;
+        namesLayer.innerHTML=''; nextNameEl.textContent='—';
+        turnInfoEl.textContent=`${state.tracks_this_turn}/${state.tracks_per_turn}`; return;
       }
       const n = ids.length;
-      const stops = ids.map((p,i) => {
-        const start = (i/n)*360;
-        const end = ((i+1)/n)*360;
-        return `${p.color} ${start}deg ${end}deg`;
-      });
+      const stops = ids.map((p,i)=>`${p.color} ${(i/n)*360}deg ${((i+1)/n)*360}deg`);
       wheelEl.style.background = `conic-gradient(${stops.join(',')})`;
-      namesLayer.innerHTML = '';
-      ids.forEach((p,i) => {
-        const tag = document.createElement('div');
-        tag.className = 'name-tag';
-        tag.innerHTML = `<span class="avatar">${AVATAR_EMOJI[p.avatar] || '🎧'}</span>${p.name}`;
+      namesLayer.innerHTML='';
+      ids.forEach((p,i)=>{
+        const tag=document.createElement('div'); tag.className='name-tag';
+        tag.innerHTML = `<span class="avatar">${AVATAR_EMOJI[p.avatar]||'🎧'}</span>${p.name}`;
         const angle = (i/n)*360 + (180/n);
         tag.style.transform = `rotate(${angle}deg) translateY(calc(var(--wheel-size) * -0.34)) rotate(${-angle}deg)`;
         namesLayer.appendChild(tag);
       });
-
-      const deg = (localState.active_index / n) * 360;
-      wheelEl.style.transform = `rotate(${-deg}deg)`;
-      nextNameEl.textContent = ids[localState.active_index]?.name || '—';
-      turnInfoEl.textContent = `Tracks: ${localState.tracks_this_turn}/${localState.tracks_per_turn}`;
+      const deg=(state.active_index/n)*360; wheelEl.style.transform=`rotate(${-deg}deg)`;
+      nextNameEl.textContent = ids[state.active_index]?.name || '—';
+      turnInfoEl.textContent = `${state.tracks_this_turn}/${state.tracks_per_turn}`;
     }
-
     function renderParticipants(){
-      const el = $('participantsList'); el.innerHTML = '';
-      localState.participants.forEach((p, i) => {
-        const row = document.createElement('div');
-        row.className = 'item';
+      const el=$('participantsList'); el.innerHTML='';
+      state.participants.forEach((p,i)=>{
+        const row=document.createElement('div'); row.className='item';
         row.innerHTML = `
-          <div>${AVATAR_EMOJI[p.avatar] || '🎧'} ${p.name}
-            <span style="display:inline-block; width:14px; height:14px; border-radius:50%; border:1px solid #333; background:${p.color}; margin-left:6px;"></span>
-            <small class="muted"> (pos ${i})</small>
+          <div>${AVATAR_EMOJI[p.avatar]||'🎧'} ${p.name}
+            <span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid #333;background:${p.color};margin-left:6px;"></span>
+            <small class="muted"> (pos ${i}) ${p.id===hostId?' • Host':''}</small>
           </div>
           <div class="row">
-            <button class="secondary" data-up="${p.profile_id}">↑</button>
-            <button class="secondary" data-dn="${p.profile_id}">↓</button>
-            <button class="secondary" data-rm="${p.profile_id}">Remove</button>
+            ${isHost()?`<button class="secondary" data-up="${p.id}">↑</button>
+            <button class="secondary" data-dn="${p.id}">↓</button>
+            <button class="secondary" data-rm="${p.id}">Remove</button>`:''}
           </div>`;
         el.appendChild(row);
       });
-      el.querySelectorAll('button[data-rm]').forEach(b => b.onclick = async () => {
-        const id = b.getAttribute('data-rm');
-        await supabase.from('session_participants').delete().eq('session_id', sessionId).eq('profile_id', id);
-      });
-      el.querySelectorAll('button[data-up]').forEach(b => b.onclick = () => moveParticipant(b.getAttribute('data-up'), -1));
-      el.querySelectorAll('button[data-dn]').forEach(b => b.onclick = () => moveParticipant(b.getAttribute('data-dn'), +1));
-    }
-
-    async function moveParticipant(profileId, delta){
-      const arr = [...localState.participants];
-      const idx = arr.findIndex(p => p.profile_id === profileId);
-      const j = idx + delta;
-      if (idx < 0 || j < 0 || j >= arr.length) return;
-      const a = arr[idx], b = arr[j];
-      await supabase.from('session_participants').update({ position: j }).eq('session_id', sessionId).eq('profile_id', a.profile_id);
-      await supabase.from('session_participants').update({ position: idx }).eq('session_id', sessionId).eq('profile_id', b.profile_id);
-    }
-
-    function renderMyStats(){
-      const el = $('myStats'); el.innerHTML = '';
-      const row = document.createElement('div');
-      row.className = 'item';
-      row.textContent = `${profile.name || 'DJ'} — Sessions: ${profile.stats.sessions || 0}, Tracks: ${profile.stats.totalTracks || 0}`;
-      el.appendChild(row);
-    }
-
-    function getSessionIdFromPath(){
-      const m = window.location.pathname.match(/\/s\/([0-9a-fA-F-]+)/);
-      return m ? m[1] : null;
-    }
-
-    // SW update toast (optional)
-    function showToast(msg){
-      const t = document.createElement('div');
-      t.style.cssText = "position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 14px;border-radius:8px;border:1px solid #2a2a2a;";
-      t.textContent = msg; document.body.appendChild(t);
-      setTimeout(()=>t.remove(),1800);
-    }
-
-    // Init
-    (async function init(){
-      if ('serviceWorker' in navigator) {
-        try { await navigator.serviceWorker.register('/service-worker.js'); } catch {}
-        navigator.serviceWorker?.addEventListener('controllerchange', () => showToast("New version available — refresh"));
+      if (isHost()){
+        el.querySelectorAll('button[data-rm]').forEach(b=>b.onclick=()=>{ broadcast('remove', { id:b.getAttribute('data-rm') }); });
+        el.querySelectorAll('button[data-up]').forEach(b=>b.onclick=()=>{ broadcast('move', { id:b.getAttribute('data-up'), delta:-1 }); });
+        el.querySelectorAll('button[data-dn]').forEach(b=>b.onclick=()=>{ broadcast('move', { id:b.getAttribute('data-dn'), delta:+1 }); });
       }
-      if (sessionId) { await followSessionRealtime(); }
-      // prefill profile UI
-      document.getElementById('profileName').value = profile.name || "";
-      document.getElementById('avatarPick').value = profile.avatar || "ninja";
-      document.getElementById('colorPick').value = profile.color || "#b14cff";
-    })();
-  </script>
+    }
+    function renderAll(){ pickHostIfNeeded(); renderParticipants(); renderWheel(); }
 
-  <!-- Runtime env injection (optional — Netlify can set these) -->
-  <script>
-    window.SUPABASE_URL = window.SUPABASE_URL || "";
-    window.SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
-    window.BASE_URL = window.BASE_URL || location.origin;
-  </script>
-</body>
-</html>
+    // ----- Timer (host drives it; others display-only) -----
+    let rafId=null, lastTick=null;
+    function startPeriod(){ if(!isHost()) return; state.phase="running"; state.timer_ms=8*60*1000; lastTick=performance.now(); loop(); sync(); }
+    function startGrace(){ if(!isHost()) return; state.phase="grace"; state.timer_ms=60*1000; lastTick=performance.now(); loop(); sync(); }
+    function loop(){
+      cancelAnimationFrame(rafId);
+      const step = ()=>{
+        const now=performance.now(); const dt=now-(lastTick||now); lastTick=now;
+        state.timer_ms=Math.max(0,(state.timer_ms||0)-dt);
+        renderTimer();
+        if(state.timer_ms<=0){
+          if(state.phase==='running') startGrace();
+          else if(state.phase==='grace') handOver(true);
+          return;
+        }
+        rafId=requestAnimationFrame(step);
+      };
+      rafId=requestAnimationFrame(step);
+    }
+    function renderTimer(){
+      const ms = Math.max(0, Math.floor(state.timer_ms||0));
+      const m = Math.floor(ms/60000); const s = Math.floor((ms%60000)/1000);
+      $('timer').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+    function sync(){ broadcast('state', state); }
+
+    // ----- Actions -----
+    $('newSessionBtn').onclick = async ()=>{
+      const id = crypto.randomUUID();
+      history.replaceState(null,"",`/s/${id}`);
+      sessionId = id; setupChannel();
+    };
+    $('copyLinkBtn').onclick = async ()=>{
+      if(!sessionId) return alert("Create a session first");
+      await navigator.clipboard.writeText(`${ENV.BASE_URL}/s/${sessionId}`); toast("Link copied");
+    };
+    $('joinBtn').onclick = ()=>{
+      me.name = $('profileName').value.trim() || 'DJ';
+      me.avatar = $('avatarPick').value;
+      me.color = $('colorPick').value;
+      saveMe();
+      channel?.track({ ...me }); // presence update
+      // Host adds/updates roster
+      isHost() && broadcast('upsert', { ...me });
+    };
+    $('tracksPerTurn').onchange = (e)=> isHost() && broadcast('tpt', { v: parseInt(e.target.value||'1',10) });
+    $('removeActiveBtn').onclick = ()=> isHost() && broadcast('remove', { id: state.participants[state.active_index]?.id });
+    $('handOverBtn').onclick = ()=>
