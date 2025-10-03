@@ -254,4 +254,116 @@
     };
     $('tracksPerTurn').onchange = (e)=> isHost() && broadcast('tpt', { v: parseInt(e.target.value||'1',10) });
     $('removeActiveBtn').onclick = ()=> isHost() && broadcast('remove', { id: state.participants[state.active_index]?.id });
-    $('handOverBtn').onclick = ()=>
+    $('handOverBtn').onclick = ()=> isHost() ? handOver(false) : broadcast('handover', {});
+    $('stillBtn').onclick = ()=> isHost() && startPeriod();
+    $('resetBtn').onclick = ()=> isHost() && (state.tracks_this_turn=0, sync());
+
+    function handOver(auto){
+      if(!isHost()) return;
+      if(!state.participants.length) return;
+      if (state.tracks_this_turn + 1 >= state.tracks_per_turn) {
+        state.tracks_this_turn = 0;
+        state.active_index = (state.active_index + 1) % state.participants.length;
+      } else {
+        state.tracks_this_turn++;
+      }
+      startPeriod(); // new window
+      sync();
+    }
+
+    // ----- Supabase channel setup -----
+    async function setupChannel(){
+      channel?.unsubscribe();
+      const topic = `session:${sessionId}`;
+      channel = supabase.channel(topic, {
+        config: { presence: { key: me.id } }
+      });
+
+      channel.on('broadcast', { event:'state' }, ({ payload })=>{
+        if(isHost()) return; state = payload; renderAll(); renderTimer();
+      });
+      channel.on('broadcast', { event:'upsert' }, ({ payload })=>{
+        if(!isHost()) return;
+        const i = state.participants.findIndex(p=>p.id===payload.id);
+        if (i>=0) state.participants[i] = payload;
+        else state.participants.push(payload);
+        sync(); renderAll();
+      });
+      channel.on('broadcast', { event:'remove' }, ({ payload })=>{
+        if(!isHost()) return;
+        state.participants = state.participants.filter(p=>p.id!==payload.id);
+        if (state.active_index >= state.participants.length) state.active_index = 0;
+        sync(); renderAll();
+      });
+      channel.on('broadcast', { event:'move' }, ({ payload })=>{
+        if(!isHost()) return;
+        const i = state.participants.findIndex(p=>p.id===payload.id);
+        const j = i + (payload.delta||0);
+        if(i<0||j<0||j>=state.participants.length) return;
+        [state.participants[i], state.participants[j]] = [state.participants[j], state.participants[i]];
+        sync(); renderAll();
+      });
+      channel.on('broadcast', { event:'tpt' }, ({ payload })=>{
+        if(!isHost()) return;
+        state.tracks_per_turn = payload.v || 1;
+        state.tracks_this_turn = 0; sync(); renderAll();
+      });
+      channel.on('broadcast', { event:'handover' }, ()=>{
+        if (!isHost()) return;
+        handOver(false);
+      });
+
+      channel.on('presence', { event: 'sync' }, ()=>{
+        // Determine/confirm host
+        const pres = channel.presenceState();
+        const ids = Object.keys(pres || {});
+        if (!hostId) hostId = ids.slice().sort()[0] || me.id;
+        // Show “live” users by lighting up names (optional)
+        renderParticipants();
+      });
+
+      await channel.subscribe(async (status)=>{
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ ...me });
+          // If I’m the first one here, I am host and start empty state
+          if (!hostId) hostId = me.id;
+          // Host sends state to late joiners periodically
+          if (isHost()) {
+            // Nudge a fresh state
+            state.participants ||= [];
+            $('tracksPerTurn').value = String(state.tracks_per_turn);
+            sync(); startPeriod();
+          }
+          renderAll(); renderTimer();
+        }
+      });
+    }
+
+    // ----- Basic toast -----
+    function toast(msg){
+      const t = document.createElement('div');
+      t.style.cssText = "position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 14px;border-radius:8px;border:1px solid #2a2a2a;";
+      t.textContent = msg; document.body.appendChild(t);
+      setTimeout(()=>t.remove(),1800);
+    }
+
+    // ----- Init -----
+    (async function init(){
+      if('serviceWorker' in navigator){ try{ await navigator.serviceWorker.register('/service-worker.js'); }catch{} }
+      document.getElementById('profileName').value = me.name || "";
+      document.getElementById('avatarPick').value = me.avatar || "ninja";
+      document.getElementById('colorPick').value = me.color || "#b14cff";
+
+      if (sessionId) setupChannel();
+    })();
+  </script>
+
+  <!-- Optional runtime env injection from Netlify -->
+  <script>
+    window.SUPABASE_URL = window.SUPABASE_URL || "";
+    window.SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
+    window.BASE_URL = window.BASE_URL || location.origin;
+  </script>
+</body>
+</html>
+
