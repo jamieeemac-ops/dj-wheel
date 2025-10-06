@@ -21,8 +21,6 @@
     small.muted { color:var(--muted); }
     .grid { display:grid; gap:14px; grid-template-columns:1fr; }
     @media (min-width:980px){ .grid-2 { grid-template-columns: 1.1fr 0.9fr; } }
-
-    /* Wheel */
     .wheel-wrap { position:relative; width:var(--wheel-size); height:var(--wheel-size); margin:0 auto; }
     .wheel { width:100%; height:100%; border-radius:50%; border:8px solid #fff; display:grid; place-items:center; transition: transform .75s cubic-bezier(.25,.9,.2,1); overflow:hidden; position:relative; }
     .pointer { position:absolute; top:-8px; left:calc(50% - 10px); width:0; height:0; border-left:10px solid transparent; border-right:10px solid transparent; border-bottom:16px solid #fff; z-index:5; }
@@ -50,7 +48,6 @@
   </header>
 
   <main class="grid grid-2">
-    <!-- Wheel -->
     <section class="panel">
       <h2 style="margin:6px 0 12px 0;">Wheel</h2>
       <div class="wheel-wrap">
@@ -87,7 +84,6 @@
       </div>
     </section>
 
-    <!-- Roster -->
     <section class="panel">
       <h2 style="margin:6px 0 12px 0;">Players</h2>
       <div class="row">
@@ -111,9 +107,8 @@
     </section>
   </main>
 
-  <!-- FULL APP SCRIPT -->
   <script type="module">
-    /* =============== Error overlay (no silent failures) =============== */
+    /* ===== Error overlay ===== */
     function showFatal(msg) {
       try {
         const d = document.createElement('div');
@@ -129,7 +124,7 @@
     window.addEventListener('error', (e)=> showFatal(e.message + '\n' + (e.filename||'') + ':' + (e.lineno||'') ));
     window.addEventListener('unhandledrejection', (e)=> showFatal('Unhandled promise rejection: ' + (e.reason?.message || e.reason)));
 
-    /* ========================= ENV & Libs ========================= */
+    /* ===== ENV & Libs ===== */
     const ENV = {
       SUPABASE_URL:  window.SUPABASE_URL  || "https://cdwyqogwbepscrgnopbw.supabase.co",
       SUPABASE_ANON_KEY: window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkd3lxb2d3YmVwc2NyZ25vcGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0Njc2MTksImV4cCI6MjA3NTA0MzYxOX0.BhXTYwEoItlHvVoJ0kUB74kFFAWpwt0BZLRkbD96BBQ",
@@ -137,7 +132,7 @@
     };
     import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-    /* ========================= State ========================= */
+    /* ===== State ===== */
     const AVATAR_EMOJI = { ninja:'🥷', robot:'🤖', demon:'😈', angel:'😇', alien:'👽', pirate:'🏴‍☠️', wizard:'🧙‍♂️' };
     const LS = "djwheel_rt_v1";
     let me = JSON.parse(localStorage.getItem(LS) || "null") || {
@@ -148,12 +143,10 @@
     let hostId = null;
     let state = { participants: [], active_index: 0, tracks_per_turn: 1, tracks_this_turn: 0, timer_ms: 8*60*1000, phase:"idle" };
 
-    // Shorthand + refs
     const $ = (id)=>document.getElementById(id);
     const wheelEl=$('wheel'), namesLayer=$('namesLayer'), nextNameEl=$('nextName'),
           turnInfoEl=$('turnInfo'), timerEl=$('timer'), connBadge=$('connBadge');
 
-    // Safe binder (prevents null.onclick crash)
     function on(id, event, handler) {
       const el = document.getElementById(id);
       if (!el) { console.warn(`[bind] missing #${id} — skipped ${event} handler`); return null; }
@@ -161,28 +154,34 @@
       return el;
     }
 
-    // Supabase client & channel
     const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, { auth: { persistSession: true } });
     let channel = null;
+    let channelRoomId = null;
     let isSubscribed = false;
 
-    /* ========================= Helpers ========================= */
+    /* ===== Helpers ===== */
     function getSessionIdFromPath(){ const m=location.pathname.match(/\/s\/([0-9a-fA-F-]+)/); return m?m[1]:null; }
     function saveMe(){ localStorage.setItem(LS, JSON.stringify(me)); }
-    function isHost(){ return me.id === hostId; }
-    function broadcast(type, payload){ try { channel?.send({ type:'broadcast', event:type, payload }); } catch(e){ console.warn('broadcast failed', e); } }
-    function pickHostIfNeeded(){
-      const ids = state.participants.map(p=>p.id);
-      if (!hostId || !ids.includes(hostId)) hostId = ids.slice().sort()[0] || me.id;
+    function amHost(){ return !!hostId && me.id === hostId; }
+    function broadcast(type, payload){
+      try {
+        if (!channel || channelRoomId !== sessionId) return;
+        channel.send({ type:'broadcast', event:type, payload });
+      } catch(e){ console.warn('broadcast failed', e); }
+    }
+    function pickHostFromPresence(){
+      const pres = channel?.presenceState?.() || {};
+      const ids = Object.keys(pres);
+      if (ids.length) hostId = ids.slice().sort()[0]; // smallest key = host
     }
     function updateConnUI(ready){
       isSubscribed = !!ready;
       const joinBtn = $('joinBtn'); if (joinBtn) joinBtn.disabled = !ready;
       if (!connBadge) return;
-      connBadge.textContent = ready ? (isHost() ? 'Connected • Host' : 'Connected • Guest') : 'Connecting…';
+      connBadge.textContent = ready ? (amHost() ? 'Connected • Host' : 'Connected • Guest') : 'Connecting…';
     }
 
-    /* ========================= Render ========================= */
+    /* ===== Render ===== */
     function renderWheel(){
       const ids = state.participants;
       if (!ids.length){
@@ -215,26 +214,26 @@
             <small class="muted"> (pos ${i}) ${p.id===hostId?' • Host':''}</small>
           </div>
           <div class="row">
-            ${isHost()?`<button class="secondary" data-up="${p.id}">↑</button>
+            ${amHost()?`<button class="secondary" data-up="${p.id}">↑</button>
             <button class="secondary" data-dn="${p.id}">↓</button>
             <button class="secondary" data-rm="${p.id}">Remove</button>`:''}
           </div>`;
         el.appendChild(row);
       });
-      if (isHost()){
+      if (amHost()){
         el.querySelectorAll('button[data-rm]').forEach(b=>b.onclick=()=>{ broadcast('remove', { id:b.getAttribute('data-rm') }); });
         el.querySelectorAll('button[data-up]').forEach(b=>b.onclick=()=>{ broadcast('move', { id:b.getAttribute('data-up'), delta:-1 }); });
         el.querySelectorAll('button[data-dn]').forEach(b=>b.onclick=()=>{ broadcast('move', { id:b.getAttribute('data-dn'), delta:+1 }); });
       }
     }
-    function renderAll(){ pickHostIfNeeded(); renderParticipants(); renderWheel(); }
+    function renderAll(){ pickHostFromPresence(); renderParticipants(); renderWheel(); }
 
-    /* ========================= Timer ========================= */
+    /* ===== Timer ===== */
     let rafId=null, lastTick=null;
-    function startPeriod(){ if(!isHost()) return; state.phase="running"; state.timer_ms=8*60*1000; lastTick=performance.now(); loop(); sync(); }
-    function startGrace(){ if(!isHost()) return; state.phase="grace"; state.timer_ms=60*1000; lastTick=performance.now(); loop(); sync(); }
-    function extendPeriod(extraMs = 8*60*1000){ if(!isHost()) return; state.phase='running'; state.timer_ms = Math.max(0, state.timer_ms||0) + extraMs; lastTick=performance.now(); loop(); sync(); }
-    function resetTurn(){ if(!isHost()) return; cancelAnimationFrame(rafId); state.tracks_this_turn=0; state.phase='idle'; state.timer_ms=8*60*1000; renderTimer(); sync(); }
+    function startPeriod(){ if(!amHost()) return; state.phase="running"; state.timer_ms=8*60*1000; lastTick=performance.now(); loop(); sync(); }
+    function startGrace(){ if(!amHost()) return; state.phase="grace"; state.timer_ms=60*1000; lastTick=performance.now(); loop(); sync(); }
+    function extendPeriod(ms = 8*60*1000){ if(!amHost()) return; state.phase='running'; state.timer_ms = Math.max(0, state.timer_ms||0) + ms; lastTick=performance.now(); loop(); sync(); }
+    function resetTurn(){ if(!amHost()) return; cancelAnimationFrame(rafId); state.tracks_this_turn=0; state.phase='idle'; state.timer_ms=8*60*1000; renderTimer(); sync(); }
     function loop(){
       cancelAnimationFrame(rafId);
       const step = ()=>{
@@ -257,11 +256,13 @@
     }
     function sync(){ broadcast('state', state); }
 
-    /* ========================= Actions (guarded) ========================= */
+    /* ===== Actions ===== */
     on('newSessionBtn','click', async ()=>{
       const id = crypto.randomUUID();
       history.replaceState(null,"",`/s/${id}`);
-      sessionId = id; setupChannel();
+      sessionId = id;
+      hostId = me.id;      // creator is host
+      setupChannel(sessionId);
     });
     on('copyLinkBtn','click', async ()=>{
       if(!sessionId) return alert("Create a session first");
@@ -269,20 +270,19 @@
     });
     on('tracksPerTurn','change',(e)=>{
       const v = parseInt(e.target.value || '1', 10);
-      if (!isHost()) { e.target.value = String(state.tracks_per_turn); return toast('Only the host can change tracks per turn.'); }
+      if (!amHost()) { e.target.value = String(state.tracks_per_turn); return toast('Only the host can change tracks per turn.'); }
       state.tracks_per_turn = Math.max(1, Math.min(3, v));
       state.tracks_this_turn = 0;
-      renderAll();
-      sync();
+      renderAll(); sync();
     });
     on('removeActiveBtn','click',()=>{
-      if (!isHost()) return;
+      if (!amHost()) return;
       const active = state.participants[state.active_index];
       if (active) broadcast('remove', { id: active.id });
     });
-    on('handOverBtn','click',()=>{ if (isHost()) handOver(false); else broadcast('handover',{}); });
-    on('stillBtn','click',()=>{ if (isHost()) extendPeriod(); });
-    on('resetBtn','click',()=>{ if (isHost()) resetTurn(); });
+    on('handOverBtn','click',()=>{ if (amHost()) handOver(false); else broadcast('handover',{}); });
+    on('stillBtn','click',()=>{ if (amHost()) extendPeriod(); });
+    on('resetBtn','click',()=>{ if (amHost()) resetTurn(); });
     on('joinBtn','click',()=>{
       if (!sessionId) return toast("Create a session first (New Session) or open a session link.");
       if (!channel || !isSubscribed) return toast("Connecting… try Join again in a second.");
@@ -291,7 +291,7 @@
       me.color  = $('colorPick').value || '#b14cff';
       saveMe();
       channel.track({ ...me });
-      if (isHost()) {
+      if (amHost()) {
         const i = state.participants.findIndex(p => p.id === me.id);
         if (i >= 0) state.participants[i] = me; else state.participants.push(me);
         renderAll(); sync();
@@ -300,8 +300,8 @@
       }
     });
 
-    function handOver(auto){
-      if(!isHost()) return;
+    function handOver(){
+      if(!amHost()) return;
       if(!state.participants.length) return;
       if (state.tracks_this_turn + 1 >= state.tracks_per_turn) {
         state.tracks_this_turn = 0;
@@ -309,27 +309,38 @@
       } else {
         state.tracks_this_turn++;
       }
-      startPeriod();
-      sync();
+      startPeriod(); sync();
     }
 
-    /* ========================= Realtime setup ========================= */
-    async function setupChannel() {
-      updateConnUI(false);
-      try { channel?.unsubscribe(); } catch {}
+    /* ===== Realtime setup ===== */
+    async function setupChannel(roomId) {
+      const targetRoom = roomId || sessionId;
+      if (!targetRoom) return;
 
-      const topic = `session:${sessionId}`;
+      updateConnUI(false);
+
+      // tear down if different room
+      if (channel && channelRoomId && channelRoomId !== targetRoom) {
+        try { await channel.unsubscribe(); } catch {}
+        channel = null;
+        channelRoomId = null;
+      }
+      // already connected to this room
+      if (channel && channelRoomId === targetRoom) return;
+
+      const topic = `session:${targetRoom}`;
       channel = supabase.channel(topic, { config: { presence: { key: me.id } } });
+      channelRoomId = targetRoom;
 
       // Host-only mutations
       channel.on('broadcast', { event: 'upsert' }, ({ payload }) => {
-        if (!isHost()) return;
+        if (!amHost()) return;
         const i = state.participants.findIndex(p => p.id === payload.id);
         if (i >= 0) state.participants[i] = payload; else state.participants.push(payload);
         renderAll(); sync();
       });
       channel.on('broadcast', { event: 'remove' }, ({ payload }) => {
-        if (!isHost()) return;
+        if (!amHost()) return;
         const idx = state.participants.findIndex(p => p.id === payload.id);
         if (idx === -1) return;
         state.participants.splice(idx, 1);
@@ -339,7 +350,7 @@
         renderAll(); sync();
       });
       channel.on('broadcast', { event: 'move' }, ({ payload }) => {
-        if (!isHost()) return;
+        if (!amHost()) return;
         const i = state.participants.findIndex(p => p.id === payload.id);
         const j = i + (payload.delta || 0);
         if (i < 0 || j < 0 || j >= state.participants.length) return;
@@ -347,62 +358,73 @@
         renderAll(); sync();
       });
       channel.on('broadcast', { event: 'tpt' }, ({ payload }) => {
-        if (!isHost()) return;
+        if (!amHost()) return;
         state.tracks_per_turn = payload.v || 1;
         state.tracks_this_turn = 0; renderAll(); sync();
       });
-      channel.on('broadcast', { event: 'handover' }, () => { if (isHost()) handOver(false); });
+      channel.on('broadcast', { event: 'handover' }, () => { if (amHost()) handOver(); });
 
-      // Guests receive authoritative state
+      // Guests receive state
       channel.on('broadcast', { event: 'state' }, ({ payload }) => {
-        if (isHost()) return;
+        if (amHost()) return;
         state = payload;
         const tptEl = $('tracksPerTurn'); if (tptEl) tptEl.value = String(state.tracks_per_turn);
         renderAll(); renderTimer();
       });
 
-      // Presence (optional UI)
+      // Request/answer snapshot
+      channel.on('broadcast', { event: 'req_state' }, () => { if (amHost()) sync(); });
+
+      // Presence
       channel.on('presence', { event: 'sync' }, () => {
-        const pres = channel.presenceState();
-        const ids = Object.keys(pres || {});
-        if (!hostId || !ids.includes(hostId)) hostId = ids.slice().sort()[0] || me.id;
+        pickHostFromPresence();
         renderParticipants();
+        updateConnUI(isSubscribed);
+      });
+      channel.on('presence', { event: 'join' }, () => {
+        pickHostFromPresence();
+        if (amHost()) sync(); // rebroadcast when anyone joins
       });
 
       await channel.subscribe(async (status) => {
-        console.log('[subscribe status]', status, 'sessionId=', sessionId);
+        console.log('[subscribe status]', status, 'room=', targetRoom, 'urlSessionId=', sessionId);
+        if (channelRoomId !== targetRoom) return; // ignore stale callbacks
         if (status === 'SUBSCRIBED') {
           updateConnUI(true);
           await channel.track({ ...me });
 
-          if (!hostId) hostId = me.id;
-
-          if (isHost()) {
+          if (amHost()) {
             const i = state.participants.findIndex(p => p.id === me.id);
             if (i >= 0) state.participants[i] = me; else state.participants.push(me);
             state.participants ||= [];
             const tptEl = $('tracksPerTurn'); if (tptEl) tptEl.value = String(state.tracks_per_turn);
             sync();
-            startPeriod(); // start timer on host
+            startPeriod();
+          } else {
+            broadcast('req_state', { ask: me.id }); // guests ask for a snapshot
           }
 
           renderAll(); renderTimer();
         }
       });
 
-      // Auto-reconnect
-      channel.on('system', { event: 'channel_closed' }, () => { console.warn('channel_closed — reconnecting'); setupChannel(); });
-      channel.on('system', { event: 'channel_error' },  () => { console.warn('channel_error — reconnecting');  setupChannel(); });
+      // Reconnect for the same room
+      channel.on('system', { event: 'channel_closed' }, () => {
+        if (channelRoomId === targetRoom) { console.warn('channel_closed — reconnecting'); setupChannel(targetRoom); }
+      });
+      channel.on('system', { event: 'channel_error' },  () => {
+        if (channelRoomId === targetRoom) { console.warn('channel_error — reconnecting');  setupChannel(targetRoom); }
+      });
     }
 
-    // Heartbeat: host rebroadcasts every 10s
+    // Host heartbeat rebroadcast
     if (!window.__djHeartbeat) {
       window.__djHeartbeat = setInterval(() => {
-        if (isHost() && channel && isSubscribed) sync();
-      }, 10000);
+        if (amHost() && channel && isSubscribed && channelRoomId === sessionId) sync();
+      }, 3000);
     }
 
-    /* ========================= Toast & Init ========================= */
+    /* ===== Toast & Init ===== */
     function toast(msg){
       const t = document.createElement('div');
       t.style.cssText = "position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 14px;border-radius:8px;border:1px solid #2a2a2a;";
@@ -417,7 +439,7 @@
       $('colorPick').value   = me.color || "#b14cff";
       const joinBtn = $('joinBtn'); if (joinBtn) joinBtn.disabled = true;
 
-      if (sessionId) { console.log('joining existing session', sessionId); setupChannel(); }
+      if (sessionId) { console.log('joining existing session', sessionId); setupChannel(sessionId); }
       else updateConnUI(false);
     })();
   </script>
@@ -431,4 +453,5 @@
   </script>
 </body>
 </html>
+
 
