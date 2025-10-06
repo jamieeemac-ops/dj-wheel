@@ -30,6 +30,9 @@
     button.danger{background:var(--danger);color:#fff;}
     .muted{color:var(--muted)}
     .badge{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid #1f2a44;background:#0b1224;}
+    .badge.ok{ background:rgba(34,197,94,.15); color:#86efac; border-color:#16a34a; }
+    .badge.warn{ background:rgba(234,179,8,.15); color:#fde68a; border-color:#ca8a04; }
+
     .wheel-wrap{position:relative;width:var(--wheel-size);height:var(--wheel-size);margin:0 auto;}
     .wheel{width:100%;height:100%;border-radius:50%;border:8px solid rgba(226,232,240,.98);display:grid;place-items:center;
       overflow:hidden;position:relative;background:conic-gradient(#334155 0 360deg);}
@@ -49,7 +52,7 @@
   <header>
     <h1>Who’s up next?</h1>
     <div class="row">
-      <span id="connBadge" class="badge">Connecting…</span>
+      <span id="connBadge" class="badge warn">Connecting…</span>
       <div class="row">
         <button class="secondary" id="copyLinkBtn">Copy Link</button>
         <button class="secondary" id="newSessionBtn">New Session</button>
@@ -69,7 +72,7 @@
               <div class="muted">Next Up</div>
               <h2 id="nextName">—</h2>
               <small class="muted">Tracks: <span id="turnInfo">0/1</span></small><br/>
-              <small class="muted">Timer: <span id="timer">06:00</span></small>
+              <small class="muted">Timer: <span class="timer" id="timer">06:00</span></small>
             </div>
           </div>
           <div id="progressLayer" style="position:absolute;inset:0;border-radius:50%;pointer-events:none;z-index:4;"></div>
@@ -77,12 +80,14 @@
           <div id="namesLayer" class="names-layer"></div>
         </div>
       </div>
+
       <div class="row" style="justify-content:center;margin-top:12px;">
         <button id="handOverBtn" class="primary">Hand Over</button>
         <button id="stillBtn" class="secondary">Still Mixing (+6m)</button>
         <button id="resetBtn" class="secondary">Reset</button>
         <button id="removeActiveBtn" class="danger">Remove Active</button>
       </div>
+
       <div class="row" style="justify-content:center;margin-top:8px;">
         <label>Tracks per turn:
           <select id="tracksPerTurn">
@@ -125,36 +130,18 @@
 
   <!-- ================= SCRIPT ================= -->
   <script type="module">
-    // Fail-safe error overlay so you don’t get a blank screen
-    window.addEventListener('error', e => {
-      const d = document.createElement('div');
-      d.style.cssText='position:fixed;inset:0;background:#000c;color:#fff;padding:16px;z-index:999999;overflow:auto';
-      d.innerHTML = '<h2>⚠️ Script error</h2><pre>'
-        + (e.message||'') + '\\n' + (e.filename||'') + ':' + (e.lineno||'') + '</pre>';
-      document.body.appendChild(d);
-      console.error('FATAL', e);
-    });
-    window.addEventListener('unhandledrejection', e=>{
-      const d = document.createElement('div');
-      d.style.cssText='position:fixed;inset:0;background:#000c;color:#fff;padding:16px;z-index:999999;overflow:auto';
-      d.innerHTML = '<h2>⚠️ Unhandled promise</h2><pre>' + (e.reason?.message || e.reason || '') + '</pre>';
-      document.body.appendChild(d);
-      console.error('FATAL REJECTION', e);
-    });
-
     // ----- ENV -----
     const ENV = {
       SUPABASE_URL:  "https://cdwyqogwbepscrgnopbw.supabase.co",
       SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkd3lxb2d3YmVwc2NyZ25vcGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0Njc2MTksImV4cCI6MjA3NTA0MzYxOX0.BhXTYwEoItlHvVoJ0kUB74kFFAWpwt0BZLRkbD96BBQ",
       BASE_URL: window.location.origin
     };
-
     import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
     // ----- Helpers / constants -----
     const $ = (id)=>document.getElementById(id);
     const AVATAR_EMOJI = { ninja:'🥷', robot:'🤖', demon:'😈', angel:'😇', alien:'👽', pirate:'🏴‍☠️', wizard:'🧙‍♂️', spaceman:'🧑‍🚀' };
-    const LS = "djwheel_rt_v4";
+    const LS = "djwheel_rt_v5";
     const fmt = (ms)=>{ const m=Math.floor(ms/60000), s=Math.floor((ms%60000)/1000); return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; };
     const sessionFromPath = ()=> { const m=location.pathname.match(/\/s\/([0-9a-fA-F-]+)/); return m?m[1]:null; };
     const toast = (msg)=>{ const t=document.createElement('div'); t.style.cssText="position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#0b1224;color:#e2e8f0;padding:10px 14px;border-radius:8px;border:1px solid #1f2a44;z-index:9999"; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),1600); };
@@ -172,13 +159,18 @@
       minutes_per_track: 6,   // host edits this in UI
       tracks_this_turn: 0,
       timer_ms: 0,
+      turn_total_ms: 0,       // FROZEN total for current DJ turn
       phase: "idle"
     };
     const msPerTrack = ()=> state.minutes_per_track * 60 * 1000;
     const totalBudgetMs = ()=> msPerTrack() * state.tracks_per_turn;
     const amHost = ()=> state.host_id && me.id === state.host_id;
 
-    // ----- UI refs (all exist in this HTML) -----
+    // Host/guest handshake flags
+    let receivedState = false;  // set true when we receive snapshot from host
+    let isCreator     = false;  // true only for the tab that clicks "New Session"
+
+    // ----- UI refs -----
     const wheelEl=$('wheel'), namesLayer=$('namesLayer'), nextNameEl=$('nextName'),
           turnInfoEl=$('turnInfo'), timerEl=$('timer'), pointerRing=$('pointerRing'),
           progressLayer=$('progressLayer'), sweepHand=$('sweepHand'),
@@ -187,7 +179,13 @@
           connBadge=$('connBadge');
 
     const setStillBtnLabel = ()=> stillBtn.textContent = `Still Mixing (+${state.minutes_per_track}m)`;
-    const setConn = (txt)=> connBadge && (connBadge.textContent = txt);
+    function updateConnBadge(){
+      const ok   = !!isSubscribed;
+      const role = amHost() ? 'Host' : 'Guest';
+      connBadge.classList.toggle('ok', ok);
+      connBadge.classList.toggle('warn', !ok);
+      connBadge.textContent = ok ? `Connected • ${role}` : 'Connecting…';
+    }
 
     // ----- Supabase Realtime -----
     const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, { auth: { persistSession: true } });
@@ -217,11 +215,14 @@
         participantsList.__bound = true;
         participantsList.addEventListener('click', (e)=>{
           if (!amHost()) return;
-          const t=e.target; if (!(t instanceof HTMLElement)) return;
-          const up=t.getAttribute('data-up'), dn=t.getAttribute('data-dn'), rm=t.getAttribute('data-rm');
-          if (up) return broadcast('move', { id:up, delta:-1 });
-          if (dn) return broadcast('move', { id:dn, delta:+1 });
-          if (rm) return broadcast('remove', { id:rm });
+          const btn = (e.target instanceof HTMLElement) ? e.target.closest('button') : null;
+          if (!btn) return;
+          const upId = btn.getAttribute('data-up');
+          const dnId = btn.getAttribute('data-dn');
+          const rmId = btn.getAttribute('data-rm');
+          if (upId) { console.log('[UI] move up', upId); return broadcast('move', { id:upId, delta:-1 }); }
+          if (dnId) { console.log('[UI] move dn', dnId); return broadcast('move', { id:dnId, delta:+1 }); }
+          if (rmId) { console.log('[UI] remove', rmId); return broadcast('remove', { id:rmId }); }
         });
       }
     }
@@ -258,9 +259,9 @@
       const n=state.participants.length;
       if (!n){ progressLayer.style.background='none'; sweepHand.innerHTML=''; return; }
       const sliceDeg=360/n, startDeg=(state.active_index % n) * sliceDeg;
-      const total=totalBudgetMs();
-      const elapsed=Math.max(0, total - Math.max(0, state.timer_ms||0));
-      const frac=Math.max(0, Math.min(1, elapsed/total));
+      const total = state.turn_total_ms || totalBudgetMs();
+      const elapsed = Math.max(0, total - Math.max(0, state.timer_ms||0));
+      const frac = Math.max(0, Math.min(1, elapsed/total));
       const endDeg=startDeg + frac*sliceDeg;
       const dark='rgba(2,6,23,.35)';
       progressLayer.style.background = `conic-gradient(
@@ -279,18 +280,52 @@
 
     // ----- Timer (host drives) -----
     let rafId=null, lastTick=null;
-    function startDJTurn(){ if(!amHost()) return; state.phase='running'; state.tracks_this_turn=0; state.timer_ms=totalBudgetMs(); lastTick=performance.now(); loop(); sync(); }
-    function extendPeriod(ms = msPerTrack()){ if(!amHost()) return; state.phase='running'; state.timer_ms=Math.max(0,state.timer_ms||0)+ms; lastTick=performance.now(); loop(); sync(); }
-    function resetTurn(){ if(!amHost()) return; cancelAnimationFrame(rafId); state.phase='idle'; state.timer_ms=totalBudgetMs(); timerEl.textContent=fmt(state.timer_ms); renderProgress(); sync(); }
+    function startDJTurn(){
+      if(!amHost()) return;
+      state.phase='running';
+      state.tracks_this_turn=0;
+      state.turn_total_ms = totalBudgetMs();   // freeze total for this turn
+      state.timer_ms      = state.turn_total_ms;
+      lastTick=performance.now();
+      loop(); sync();
+    }
+    function extendPeriod(ms = msPerTrack()){
+      if(!amHost()) return;
+      state.phase='running';
+      state.turn_total_ms += ms;               // keep denom in sync
+      state.timer_ms      += ms;               // add to remaining
+      lastTick=performance.now();
+      loop(); sync();
+    }
+    function resetTurn(){
+      if(!amHost()) return;
+      cancelAnimationFrame(rafId);
+      state.phase='idle';
+      state.turn_total_ms = totalBudgetMs();
+      state.timer_ms      = state.turn_total_ms;
+      timerEl.textContent=fmt(state.timer_ms);
+      renderProgress(); sync();
+    }
     function loop(){
       cancelAnimationFrame(rafId);
-      const step=()=>{ const now=performance.now(); const dt=now-(lastTick||now); lastTick=now;
-        state.timer_ms=Math.max(0,(state.timer_ms||0)-dt); timerEl.textContent=fmt(Math.floor(state.timer_ms)); renderProgress();
+      const step=()=>{
+        const now=performance.now(), dt=now-(lastTick||now); lastTick=now;
+        state.timer_ms=Math.max(0,(state.timer_ms||0)-dt);
+        timerEl.textContent=fmt(Math.floor(state.timer_ms));
+        renderProgress();
         if (state.timer_ms<=0){ handOver(); return; }
         rafId=requestAnimationFrame(step);
-      }; rafId=requestAnimationFrame(step);
+      };
+      rafId=requestAnimationFrame(step);
     }
-    function handOver(){ if(!amHost()||!state.participants.length) return; state.active_index=(state.active_index+1)%state.participants.length; startDJTurn(); sync(); }
+    function handOver(){
+      if(!amHost()||!state.participants.length) return;
+      state.active_index=(state.active_index+1)%state.participants.length;
+      startDJTurn();
+      const next = state.participants[state.active_index];
+      if (next) notifyNextDJ(next);   // push (no-op if not configured)
+      sync();
+    }
     const sync = ()=> broadcast('state', state);
 
     // ----- Channel setup -----
@@ -300,24 +335,28 @@
       if (channel && currentRoom===room) return;
 
       channel = supabase.channel(`session:${room}`, { config:{ presence:{ key: me.id } } });
-      currentRoom = room; setConn('Connecting…');
+      currentRoom = room; isSubscribed=false; updateConnBadge();
 
-      // host-only mutations
+      // Host-only mutations
       channel.on('broadcast', { event:'upsert' }, ({payload})=>{
-        if(!amHost())return; const i=state.participants.findIndex(p=>p.id===payload.id);
+        if(!amHost())return;
+        const i=state.participants.findIndex(p=>p.id===payload.id);
         if(i>=0) state.participants[i]=payload; else state.participants.push(payload);
         renderAll(); sync();
       });
       channel.on('broadcast', { event:'remove' }, ({payload})=>{
-        if(!amHost())return; const idx=state.participants.findIndex(p=>p.id===payload.id);
-        if(idx===-1) return; state.participants.splice(idx,1);
+        if(!amHost())return;
+        const idx=state.participants.findIndex(p=>p.id===payload.id);
+        if(idx===-1) return;
+        state.participants.splice(idx,1);
         if (state.participants.length===0) state.active_index=0;
         else if (idx<state.active_index) state.active_index-=1;
         else if (idx===state.active_index) state.active_index%=state.participants.length;
         renderAll(); sync();
       });
       channel.on('broadcast', { event:'move' }, ({payload})=>{
-        if(!amHost())return; const i=state.participants.findIndex(p=>p.id===payload.id); if(i<0) return;
+        if(!amHost())return;
+        const i=state.participants.findIndex(p=>p.id===payload.id); if(i<0) return;
         const j=Math.max(0, Math.min(state.participants.length-1, i + (payload.delta||0))); if(i===j) return;
         [state.participants[i], state.participants[j]]=[state.participants[j], state.participants[i]];
         if (state.active_index===i) state.active_index=j; else if (state.active_index===j) state.active_index=i;
@@ -327,43 +366,53 @@
         if(!amHost())return; state.tracks_per_turn=payload.v||1; state.tracks_this_turn=0; renderAll(); sync();
       });
       channel.on('broadcast', { event:'mpt' }, ({payload})=>{
-        if(!amHost())return; state.minutes_per_track=payload.v||6; setStillBtnLabel(); renderAll(); sync();
+        if(!amHost())return; state.minutes_per_track=payload.v||6; setStillBtnLabel(); if(state.phase==='idle'){ state.turn_total_ms=totalBudgetMs(); timerEl.textContent=fmt(state.turn_total_ms); renderProgress(); } renderAll(); sync();
       });
       channel.on('broadcast', { event:'handover' }, ()=>{ if(amHost()) handOver(); });
       channel.on('broadcast', { event:'req_state' }, ()=>{ if(amHost()) sync(); });
 
+      // Guests adopt full state
       channel.on('broadcast', { event:'state' }, ({payload})=>{
-        if (amHost()) return; state = payload;
+        if (amHost()) return;
+        receivedState = true;  // snapshot received
+        state = payload;
         tracksSel.value = String(state.tracks_per_turn);
         minutesSel.value = String(state.minutes_per_track);
-        renderAll(); timerEl.textContent = fmt(Math.floor(state.timer_ms || totalBudgetMs()));
+        renderAll();
+        timerEl.textContent = fmt(Math.floor(state.timer_ms || totalBudgetMs()));
+        updateConnBadge();
       });
 
+      // Presence repair (only if host existed and left)
       channel.on('presence', { event:'sync' }, ()=>{
         const pres = channel.presenceState?.() || {}; const ids = Object.keys(pres);
-        if (!state.host_id){ if (ids.includes(me.id)) { state.host_id = me.id; sync(); } }
-        else if (!ids.includes(state.host_id)){
-          const newHost = ids.slice().sort()[0] || null; if (newHost && me.id===newHost){ state.host_id=newHost; sync(); }
+        if (state.host_id && !ids.includes(state.host_id)){
+          const newHost = ids.slice().sort()[0] || null;
+          if (newHost && me.id===newHost){ state.host_id=newHost; sync(); }
         }
-        renderParticipants();
+        renderParticipants(); updateConnBadge();
       });
 
       await channel.subscribe(async (status)=>{
         console.log('[subscribe status]', status, 'room=', room, 'urlSessionId=', sessionId);
         if (status!=='SUBSCRIBED') return;
-        isSubscribed = true; setConn('Connected');
+        isSubscribed = true; updateConnBadge();
         await channel.track({ ...me });
 
-        if (!state.host_id){
-          state.host_id = me.id;
-          const i=state.participants.findIndex(p=>p.id===me.id); if(i>=0) state.participants[i]=me; else state.participants.push(me);
-          tracksSel.value = String(state.tracks_per_turn);
-          minutesSel.value = String(state.minutes_per_track);
-          resetTurn(); sync();
-        } else {
-          broadcast('req_state', { ask: me.id });
-        }
-        renderAll();
+        // Ask for snapshot; only self-elect if creator AND alone AND no snapshot in 2s
+        receivedState = false;
+        broadcast('req_state', { ask: me.id });
+        clearTimeout(window.__snapshotTimer);
+        window.__snapshotTimer = setTimeout(()=>{
+          if (receivedState || state.host_id) return;
+          const pres = channel.presenceState?.() || {}; const ids = Object.keys(pres);
+          if (ids.length===1 && ids[0]===me.id && isCreator) {
+            state.host_id = me.id;
+            resetTurn(); sync();
+          }
+        }, 2000);
+
+        renderAll(); updateConnBadge();
       });
 
       channel.on('system', { event:'channel_closed' }, ()=> setupChannel(room));
@@ -374,16 +423,27 @@
     $('newSessionBtn').onclick = ()=>{
       const id = crypto.randomUUID();
       history.replaceState(null,"",`/s/${id}`);
-      sessionId = id; state.host_id = me.id; setupChannel(sessionId); resetTurn(); renderAll();
+      sessionId = id;
+
+      isCreator = true;          // I created this room
+      state.host_id = me.id;     // I am the host
+
+      $('newSessionBtn').disabled = true; // avoid accidental second room
+      setupChannel(sessionId);
+      resetTurn(); renderAll(); updateConnBadge();
     };
+
     $('copyLinkBtn').onclick = async ()=>{ await navigator.clipboard.writeText(`${ENV.BASE_URL}/s/${sessionId||''}`); toast('Link copied'); };
+
     $('joinBtn').onclick = ()=>{
       me.name = $('profileName').value.trim() || 'DJ';
       me.avatar = $('avatarPick').value || 'ninja';
       me.color  = $('colorPick').value || '#7c3aed';
-      saveMe();
+      saveMe(); setupPush();
+
       if (!sessionId) return toast('Create a session first');
       if (!isSubscribed) return toast('Connecting… try again');
+
       channel.track({ ...me });
       if (amHost()){
         const i=state.participants.findIndex(p=>p.id===me.id); if(i>=0) state.participants[i]=me; else state.participants.push(me);
@@ -392,6 +452,7 @@
         broadcast('upsert', { ...me });
       }
     };
+
     $('addGuestBtn').onclick = ()=>{
       if (!amHost()) return toast('Only host can add players here');
       const name = prompt('Guest DJ name?'); if (!name) return;
@@ -408,17 +469,51 @@
     tracksSel.onchange = (e)=>{
       const v=parseInt(e.target.value||'1',10);
       if (!amHost()) { tracksSel.value=String(state.tracks_per_turn); return toast('Host only'); }
-      state.tracks_per_turn=Math.max(1,Math.min(3,v)); setStillBtnLabel(); renderAll(); sync();
+      state.tracks_per_turn=Math.max(1,Math.min(3,v));
       broadcast('tpt', { v: state.tracks_per_turn });
+      renderAll(); sync();
     };
     minutesSel.onchange = (e)=>{
       const v=parseInt(e.target.value||'6',10);
       if (!amHost()) { minutesSel.value=String(state.minutes_per_track); return toast('Host only'); }
-      state.minutes_per_track=Math.max(1,Math.min(60,v)); setStillBtnLabel();
-      if (state.phase==='idle'){ timerEl.textContent = fmt(totalBudgetMs()); renderProgress(); }
+      state.minutes_per_track=Math.max(1,Math.min(60,v));
+      setStillBtnLabel();
+      if (state.phase==='idle'){ state.turn_total_ms=totalBudgetMs(); timerEl.textContent=fmt(state.turn_total_ms); renderProgress(); }
       broadcast('mpt', { v: state.minutes_per_track });
       renderAll(); sync();
     };
+
+    // ----- Push (OneSignal) -----
+    async function setupPush(){
+      try {
+        if (!('OneSignal' in window)) return;
+        const res = await OneSignal.Notifications.requestPermission();
+        if (res !== 'granted') return;
+        const playerId = await OneSignal.User.getId();
+        if (!playerId) return;
+        await supabase.from('push_tokens').upsert({
+          profile_local_id: me.id,
+          onesignal_player_id: playerId,
+          last_seen_at: new Date().toISOString()
+        }, { onConflict: 'profile_local_id' });
+      } catch(e){ console.warn('setupPush failed', e); }
+    }
+    async function notifyNextDJ(next){
+      try{
+        const { data } = await supabase.from('push_tokens')
+          .select('onesignal_player_id').eq('profile_local_id', next.id).maybeSingle();
+        const pid = data?.onesignal_player_id; if (!pid) return;
+        await fetch(`${ENV.SUPABASE_URL.replace('.co','.co/functions/v1')}/send-turn-push`, {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            playerId: pid,
+            title: "You’re up next 🎧",
+            message: `${next.name||'DJ'} — it’s your turn!`,
+            url: `${ENV.BASE_URL}/s/${sessionId}`
+          })
+        });
+      } catch(e){ console.warn('notifyNextDJ failed', e); }
+    }
 
     // ----- Init -----
     (function init(){
@@ -429,10 +524,22 @@
       minutesSel.value       = String(state.minutes_per_track);
       setStillBtnLabel();
 
-      if (sessionId) { setConn('Connecting…'); setupChannel(sessionId); }
-      else setConn('Create a session');
+      if (sessionId) { $('newSessionBtn').disabled = true; setupChannel(sessionId); }
+      updateConnBadge();
+      // Optionally prompt push on load (browser may require user gesture)
+      // setupPush();
     })();
+  </script>
+
+  <!-- OneSignal SDK (push) -->
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({ appId: "5060d504-c36b-4330-a408-b905427c79a0" });
+    });
   </script>
 </body>
 </html>
+
 
