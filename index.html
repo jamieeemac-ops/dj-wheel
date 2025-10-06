@@ -140,7 +140,9 @@
           turnInfoEl=$('turnInfo'), timerEl=$('timer');
 
     // Channel (created after sessionId exists)
-    let channel = null;
+  let channel = null;
+let isSubscribed = false; //
+
 
     // ----- PWA install -----
     let deferredPrompt;
@@ -243,33 +245,30 @@
       if(!sessionId) return alert("Create a session first");
       await navigator.clipboard.writeText(`${ENV.BASE_URL}/s/${sessionId}`); toast("Link copied");
     };
- $('joinBtn').onclick = () => {
-  me.name = $('profileName').value.trim() || 'DJ';
-  me.avatar = $('avatarPick').value;
-  me.color = $('colorPick').value;
+$('joinBtn').onclick = () => {
+  if (!sessionId) return toast("Create a session first (New Session) or open a session link.");
+  if (!channel || !isSubscribed) return toast("Connecting… try Join again in a second.");
+
+  me.name   = $('profileName').value.trim() || 'DJ';
+  me.avatar = $('avatarPick').value || 'ninja';
+  me.color  = $('colorPick').value || '#b14cff';
   saveMe();
 
-  if (!channel) {
-    toast("Create a session first (New Session) or open a session link.");
-    return;
-  }
-
-  // everyone updates presence (safe to call multiple times)
-  channel.track({ ...me });
+  channel.track({ ...me }); // presence is harmless to call often
 
   if (isHost()) {
-    // host updates local state then broadcasts full state
     const i = state.participants.findIndex(p => p.id === me.id);
     if (i >= 0) state.participants[i] = me;
     else state.participants.push(me);
-    sync();           // sends { event: 'state', payload: state } to all
     renderAll();
+    sync();                  // host pushes full state
   } else {
-    // non-host: ask host to upsert me
-    broadcast('upsert', { ...me });
+    broadcast('upsert', { ...me });  // guest asks host to upsert
   }
 };
 
+  }
+};
     };
     $('tracksPerTurn').onchange = (e)=> isHost() && broadcast('tpt', { v: parseInt(e.target.value||'1',10) });
     $('removeActiveBtn').onclick = ()=> isHost() && broadcast('remove', { id: state.participants[state.active_index]?.id });
@@ -293,6 +292,7 @@
     // ----- Supabase channel setup -----
     async function setupChannel(){
       channel?.unsubscribe();
+        isSubscribed = false;   
       const topic = `session:${sessionId}`;
       channel = supabase.channel(topic, {
         config: { presence: { key: me.id } }
@@ -341,21 +341,37 @@
         renderParticipants();
       });
 
-      await channel.subscribe(async (status)=>{
-        if (status === 'SUBSCRIBED') {
-          await channel.track({ ...me });
-          // If I’m the first one here, I am host and start empty state
-          if (!hostId) hostId = me.id;
-          // Host sends state to late joiners periodically
-          if (isHost()) {
-            // Nudge a fresh state
-            state.participants ||= [];
-            $('tracksPerTurn').value = String(state.tracks_per_turn);
-            sync(); startPeriod();
-          }
-          renderAll(); renderTimer();
-        }
-      });
+    await channel.subscribe(async (status) => {
+  if (status !== 'SUBSCRIBED') return;
+
+  isSubscribed = true;                 // ready
+  await channel.track({ ...me });      // presence
+
+  // First joiner becomes host
+  if (!hostId) hostId = me.id;
+
+  if (isHost()) {
+    // ensure participants array exists
+    state.participants ||= [];
+
+    // ensure host is in the list (upsert)
+    const i = state.participants.findIndex(p => p.id === me.id);
+    if (i >= 0) state.participants[i] = me;
+    else state.participants.push(me);
+
+    // reflect current UI control and start timer window
+    $('tracksPerTurn').value = String(state.tracks_per_turn);
+    startPeriod();
+
+    // broadcast full state to everyone
+    sync();
+  }
+
+  // update my UI
+  renderAll();
+  renderTimer();
+});
+
     }
 
     // ----- Basic toast -----
