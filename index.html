@@ -1,687 +1,560 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#0a0f1a" />
-  <link rel="manifest" href="/manifest.json" />
-  <title>Who’s up next?</title>
-  <style>
-    :root{
-      --bg:#0a0f1a; --panel:#0f172a; --panel-border:#1e293b; --muted:#94a3b8; --text:#e2e8f0;
-      --accent:#7c3aed; --accent-2:#22d3ee; --success:#22c55e; --danger:#ef4444; --warning:#eab308;
-      --chip:#0b1224; --wheel-size:340px;
-    }
-    *{ box-sizing:border-box; }
-    body{
-      margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-      background: radial-gradient(1200px 1200px at 10% -20%, rgba(124,58,237,.20), transparent 50%),
-                  radial-gradient(1000px 800px at 110% 10%, rgba(34,211,238,.15), transparent 50%),
-                  var(--bg);
-      color:var(--text);
-    }
-    header{
-      padding:12px 16px; border-bottom:1px solid var(--panel-border);
-      display:flex; gap:10px; align-items:center; justify-content:space-between; position:sticky; top:0;
-      background: linear-gradient(180deg, rgba(10,15,26,.9), rgba(10,15,26,.7));
-      backdrop-filter: blur(6px);
-    }
-    h1{ margin:0; font-size:18px; font-weight:800; letter-spacing:.2px; }
-    main{ padding:16px; display:grid; gap:16px; max-width:1080px; margin:0 auto; }
-    .panel{
-      background:linear-gradient(180deg, rgba(15,23,42,.96), rgba(15,23,42,.92));
-      border:1px solid var(--panel-border); border-radius:14px; padding:12px; box-shadow: 0 6px 20px rgba(0,0,0,.25);
-    }
-    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    input[type="text"], select, input[type="color"]{
-      padding:10px 12px; border-radius:10px; border:1px solid var(--panel-border);
-      background:#0b1224; color:#fff; outline:none;
-    }
-    input[type="text"]:focus, select:focus { border-color:#334155; box-shadow:0 0 0 3px rgba(124,58,237,.25); }
-    button{
-      padding:10px 14px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; cursor:pointer;
-      box-shadow:0 4px 14px rgba(124,58,237,.35);
-      transition: transform .08s ease, filter .15s ease;
-    }
-    button:active{ transform: translateY(1px); }
-    button.secondary{ background:#111827; color:#e5e7eb; border:1px solid #1f2937; box-shadow:none; }
-    button.ghost{ background:transparent; color:#cbd5e1; border:1px dashed #334155; }
-    button.danger{ background:var(--danger); box-shadow:0 4px 14px rgba(239,68,68,.35); }
-    button.success{ background:var(--success); box-shadow:0 4px 14px rgba(34,197,94,.35); }
-    small.muted{ color:var(--muted); }
-    .grid{ display:grid; gap:14px; grid-template-columns:1fr; }
-    @media (min-width:980px){ .grid-2{ grid-template-columns: 1.1fr 0.9fr; } }
+<script type="module">
+  /* =========================
+   *  Who’s up next? — Realtime
+   * ========================= */
 
-    /* Wheel */
-    .wheel-wrap{ position:relative; width:var(--wheel-size); height:var(--wheel-size); margin:0 auto; }
-    .wheel{
-      width:100%; height:100%; border-radius:50%;
-      border:8px solid rgba(226,232,240,.98);
-      display:grid; place-items:center; overflow:hidden; position:relative; background: conic-gradient(#334155 0 360deg);
-      box-shadow: inset 0 0 40px rgba(0,0,0,.35);
-    }
-    /* Rotating pointer ring */
-    .pointer-ring{ position:absolute; inset:-8px; border-radius:50%; z-index:6; pointer-events:none; transition: transform .6s cubic-bezier(.25,.9,.2,1); }
-    .pointer{
-      position:absolute; top:-8px; left:calc(50% - 10px); width:0; height:0;
-      border-left:10px solid transparent; border-right:10px solid transparent; border-bottom:16px solid #e2e8f0;
-      filter: drop-shadow(0 4px 6px rgba(0,0,0,.25));
-    }
-    .center-label{
-      position:absolute; width:170px; height:170px; border-radius:50%; background:#0b1224; border:2px solid #334155;
-      display:grid; place-items:center; text-align:center; padding:8px; z-index:3; color:#fff;
-      box-shadow: 0 10px 25px rgba(0,0,0,.35);
-    }
-    .center-label h2{ margin:2px 0 0 0; font-size:16px; }
-    .pill{ padding:6px 10px; border-radius:999px; background:var(--chip); border:1px solid #1f2a44; font-size:12px; color:#c7d2fe; }
-    .timer{ font-variant-numeric: tabular-nums; font-weight:800; }
-    .names-layer{ position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; z-index:2; }
-    .name-tag{
-      position:absolute; font-size:12px; font-weight:700; background:rgba(2,6,23,.55);
-      padding:4px 6px; border-radius:6px; transform-origin:50% calc(var(--wheel-size) * -0.34); color:#fff; display:flex; align-items:center; gap:6px;
-      border:1px solid rgba(51,65,85,.6); backdrop-filter: blur(1px); text-shadow: 0 1px 2px rgba(0,0,0,.6);
-    }
-    .name-tag .avatar{ font-size:16px; }
+  // ----- ENV -----
+  const ENV = {
+    SUPABASE_URL:
+      window.SUPABASE_URL ||
+      "https://cdwyqogwbepscrgnopbw.supabase.co",
+    SUPABASE_ANON_KEY:
+      window.SUPABASE_ANON_KEY ||
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkd3lxb2d3YmVwc2NyZ25vcGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0Njc2MTksImV4cCI6MjA3NTA0MzYxOX0.BhXTYwEoItlHvVoJ0kUB74kFFAWpwt0BZLRkbD96BBQ",
+    BASE_URL: window.BASE_URL || window.location.origin,
+  };
 
-    .list{ display:grid; gap:8px; }
-    .item{
-      background:linear-gradient(180deg, rgba(11,18,36,.96), rgba(11,18,36,.92));
-      border:1px solid #1f2a44; padding:10px; border-radius:12px; display:flex; align-items:center; justify-content:space-between;
-    }
+  // ----- Imports -----
+  import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-    .badge{
-      font-size:12px; padding:6px 10px; border-radius:999px; border:1px solid #1f2a44; background:#0b1224; color:#cbd5e1;
-    }
-    .badge.connected{ background: rgba(34,197,94,.12); color:#86efac; border-color:#14532d; }
-    .badge.host{ background: rgba(234,179,8,.12); color:#fde68a; border-color:#713f12; }
-    .badge.guest{ background: rgba(34,211,238,.12); color:#67e8f9; border-color:#164e63; }
-    .badge.connecting{ background: rgba(124,58,237,.12); color:#c4b5fd; border-color:#4c1d95; }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Who’s up next?</h1>
-    <div class="row">
-      <span id="connBadge" class="badge connecting">Connecting…</span>
-      <div class="row">
-        <button class="secondary" id="copyLinkBtn">Copy Link</button>
-        <button class="secondary" id="newSessionBtn">New Session</button>
-      </div>
-    </div>
-  </header>
+  // ----- Helpers / constants -----
+  const $ = (id) => document.getElementById(id);
+  const AVATAR_EMOJI = {
+    ninja: "🥷",
+    robot: "🤖",
+    demon: "😈",
+    angel: "😇",
+    alien: "👽",
+    pirate: "🏴‍☠️",
+    wizard: "🧙‍♂️",
+    spaceman: "🧑‍🚀",
+  };
+  const LS = "djwheel_rt_v3";
+  function getSessionIdFromPath() {
+    const m = location.pathname.match(/\/s\/([0-9a-fA-F-]+)/);
+    return m ? m[1] : null;
+  }
+  function formatMMSS(ms) {
+    const m = Math.floor(ms / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  function toast(msg) {
+    const t = document.createElement("div");
+    t.style.cssText =
+      "position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#0b1224;color:#e2e8f0;padding:10px 14px;border-radius:8px;border:1px solid #1f2a44;box-shadow:0 8px 20px rgba(0,0,0,.35);z-index:99999";
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 1600);
+  }
 
-  <main class="grid grid-2">
-    <!-- Wheel -->
-    <section class="panel">
-      <h2 style="margin:6px 0 12px 0;">Wheel</h2>
-      <div class="wheel-wrap">
-        <!-- Rotating ring contains the pointer triangle -->
-        <div id="pointerRing" class="pointer-ring"><div class="pointer"></div></div>
+  // ----- Local profile -----
+  let me =
+    JSON.parse(localStorage.getItem(LS) || "null") || {
+      id: crypto.randomUUID(),
+      name: "",
+      avatar: "ninja",
+      color: "#7c3aed",
+    };
+  function saveMe() {
+    localStorage.setItem(LS, JSON.stringify(me));
+  }
 
-        <div id="wheel" class="wheel">
-          <div class="center-label">
-            <div>
-              <div class="pill">Next Up</div>
-              <h2 id="nextName">—</h2>
-              <small class="muted">Tracks: <span id="turnInfo">0/1</span></small><br/>
-              <small class="muted">Timer: <span class="timer" id="timer">08:00</span></small>
-            </div>
-          </div>
+  // ----- Shared state (synced) -----
+  // minutes_per_track default = 6 (host can change)
+  let state = {
+    host_id: null,
+    participants: [],
+    active_index: 0,
+    tracks_per_turn: 1,
+    minutes_per_track: 6,
+    tracks_this_turn: 0,
+    timer_ms: 0,
+    phase: "idle",
+  };
 
-          <!-- Progress wedge + sweep hand -->
-          <div id="progressLayer" style="position:absolute; inset:0; border-radius:50%; pointer-events:none; z-index:4;"></div>
-          <div id="sweepHand" style="position:absolute; inset:0; border-radius:50%; z-index:5; pointer-events:none;"></div>
+  // Derived helpers
+  const msPerTrack = () => state.minutes_per_track * 60 * 1000;
+  const totalBudgetMs = () => msPerTrack() * state.tracks_per_turn;
+  const amHost = () => state.host_id && me.id === state.host_id;
 
-          <div id="namesLayer" class="names-layer"></div>
+  // ----- UI refs -----
+  const wheelEl = $("wheel"),
+    namesLayer = $("namesLayer"),
+    nextNameEl = $("nextName"),
+    turnInfoEl = $("turnInfo"),
+    timerEl = $("timer"),
+    pointerRing = $("pointerRing"),
+    progressLayer = $("progressLayer"),
+    sweepHand = $("sweepHand"),
+    participantsList = $("participantsList"),
+    stillBtn = $("stillBtn"),
+    minutesSel = $("minutesPerTrack"),
+    tracksSel = $("tracksPerTurn");
+
+  function setStillBtnLabel() {
+    if (stillBtn) stillBtn.textContent = `Still Mixing (+${state.minutes_per_track}m)`;
+  }
+
+  // ----- Supabase Realtime -----
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, {
+    auth: { persistSession: true },
+  });
+  let channel = null;
+  let sessionId = getSessionIdFromPath();
+  let isSubscribed = false;
+  let currentRoom = null;
+
+  function broadcast(event, payload) {
+    if (channel && currentRoom === sessionId)
+      channel.send({ type: "broadcast", event, payload });
+  }
+
+  // ----- Rendering -----
+  function rotatePointerToSlice(deg) {
+    if (pointerRing) pointerRing.style.transform = `rotate(${deg}deg)`;
+  }
+
+  function renderParticipants() {
+    participantsList.innerHTML = "";
+    state.participants.forEach((p, i) => {
+      const row = document.createElement("div");
+      row.className = "item";
+      row.innerHTML = `
+        <div>${AVATAR_EMOJI[p.avatar] || "🎧"} ${p.name}
+          <span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid #1f2a44;background:${p.color};margin-left:6px;"></span>
+          <small class="muted"> (pos ${i + 1}) ${p.id === state.host_id ? " • Host" : ""}</small>
         </div>
-      </div>
+        <div class="row">
+          ${
+            amHost()
+              ? `
+            <button class="secondary" data-up="${p.id}">↑</button>
+            <button class="secondary" data-dn="${p.id}">↓</button>
+            <button class="danger"    data-rm="${p.id}">Remove</button>
+          `
+              : ""
+          }
+        </div>
+      `;
+      participantsList.appendChild(row);
+    });
 
-      <div class="row" style="justify-content:center; margin-top:12px;">
-        <button id="handOverBtn">Hand Over</button>
-        <button class="secondary" id="stillBtn">Still Mixing (+8m)</button>
-        <button class="secondary" id="resetBtn">Reset Turn</button>
-        <button class="danger" id="removeActiveBtn">Remove Active</button>
-      </div>
-
-      <div class="row" style="justify-content:center; margin-top:8px;">
-        <label>Tracks per turn:
-          <select id="tracksPerTurn">
-            <option value="1" selected>1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-          </select>
-        </label>
-        <span class="pill">Realtime sync via Supabase • No DB required</span>
-      </div>
-    </section>
-
-    <!-- Roster -->
-    <section class="panel">
-      <h2 style="margin:6px 0 12px 0;">Players</h2>
-      <div class="row">
-        <input id="profileName" type="text" placeholder="Your DJ name" />
-        <select id="avatarPick" title="Avatar">
-          <option value="ninja">🥷 Ninja</option>
-          <option value="robot">🤖 Robot</option>
-          <option value="demon">😈 Demon</option>
-          <option value="angel">😇 Angel</option>
-          <option value="alien">👽 Alien</option>
-          <option value="pirate">🏴‍☠️ Pirate</option>
-          <option value="wizard">🧙‍♂️ Wizard</option>
-          <option value="spaceman">🧑‍🚀 Spaceman</option>
-        </select>
-        <input id="colorPick" type="color" value="#7c3aed" />
-        <button id="joinBtn" class="success" disabled>Join / Update</button>
-      </div>
-      <small class="muted">First person to tap “New Session” becomes Host. Others join with the link; Host manages order.</small>
-
-      <h3 style="margin:12px 0 8px 0;">Current Lineup</h3>
-      <div id="participantsList" class="list"></div>
-    </section>
-  </main>
-
-  <script type="module">
-    /* ===== Error overlay ===== */
-    function showFatal(msg) {
-      try {
-        const d = document.createElement('div');
-        d.style.cssText = 'position:fixed;inset:0;background:#000c;color:#fff;padding:16px;z-index:99999;overflow:auto';
-        d.innerHTML = `<div style="max-width:900px;margin:0 auto">
-          <h2>⚠️ Script error</h2>
-          <pre style="white-space:pre-wrap">${msg}</pre>
-        </div>`;
-        document.body.appendChild(d);
-        console.error('[FATAL]', msg);
-      } catch {}
-    }
-    window.addEventListener('error', (e)=> showFatal(e.message + '\n' + (e.filename||'') + ':' + (e.lineno||'') ));
-    window.addEventListener('unhandledrejection', (e)=> showFatal('Unhandled promise rejection: ' + (e.reason?.message || e.reason)));
-
-    /* ===== ENV & Libs ===== */
-    const ENV = {
-      SUPABASE_URL:  window.SUPABASE_URL  || "https://cdwyqogwbepscrgnopbw.supabase.co",
-      SUPABASE_ANON_KEY: window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkd3lxb2d3YmVwc2NyZ25vcGJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0Njc2MTksImV4cCI6MjA3NTA0MzYxOX0.BhXTYwEoItlHvVoJ0kUB74kFFAWpwt0BZLRkbD96BBQ",
-      BASE_URL: window.BASE_URL || window.location.origin
-    };
-    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-
-    /* ===== State ===== */
-    const AVATAR_EMOJI = {
-      ninja:'🥷', robot:'🤖', demon:'😈', angel:'😇', alien:'👽', pirate:'🏴‍☠️', wizard:'🧙‍♂️', spaceman:'🧑‍🚀'
-    };
-    const LS = "djwheel_rt_v1";
-    let me = JSON.parse(localStorage.getItem(LS) || "null") || {
-      id: crypto.randomUUID(), name: "", avatar: "ninja", color: "#7c3aed"
-    };
-
-    let sessionId = getSessionIdFromPath(); // /s/:id or null
-    let hostId = null;
-
-    // Authoritative shared state
-    const PERIOD_MS = 8 * 60 * 1000;
-    const GRACE_MS  = 60 * 1000;
-    let state = {
-      host_id: null,
-      participants: [],
-      active_index: 0,
-      tracks_per_turn: 1,
-      tracks_this_turn: 0,
-      timer_ms: PERIOD_MS,
-      phase: "idle"
-    };
-
-    const $ = (id)=>document.getElementById(id);
-    const wheelEl=$('wheel'), namesLayer=$('namesLayer'), nextNameEl=$('nextName'),
-          turnInfoEl=$('turnInfo'), timerEl=$('timer'), connBadge=$('connBadge'),
-          pointerRing=$('pointerRing');
-
-    function on(id, event, handler) {
-      const el = document.getElementById(id);
-      if (!el) { console.warn(`[bind] missing #${id} — skipped ${event} handler`); return null; }
-      el.addEventListener(event, handler); return el;
-    }
-
-    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_ANON_KEY, { auth: { persistSession: true } });
-    let channel = null;
-    let channelRoomId = null;
-    let isSubscribed = false;
-
-    /* ===== Helpers ===== */
-    function getSessionIdFromPath(){
-      // matches /s/<uuid>
-      const m = location.pathname.match(/\/s\/([0-9a-fA-F-]+)/);
-      return m ? m[1] : null;
-    }
-    function saveMe(){ localStorage.setItem(LS, JSON.stringify(me)); }
-    function amHost(){ return !!hostId && me.id === hostId; }
-    function setBadge(state){
-      connBadge.classList.remove('connected','host','guest','connecting');
-      connBadge.classList.add(state);
-    }
-    function broadcast(type, payload){
-      try { if (!channel || channelRoomId !== sessionId) return;
-        channel.send({ type:'broadcast', event:type, payload });
-      } catch(e){ console.warn('broadcast failed', e); }
-    }
-    function pickHostFromPresence(){
-      const pres = channel?.presenceState?.() || {};
-      const ids = Object.keys(pres);
-      if (state.host_id && ids.includes(state.host_id)) { hostId = state.host_id; return; }
-      if (state.host_id && !ids.includes(state.host_id)) {
-        const newHost = ids.slice().sort()[0] || null;
-        hostId = newHost;
-        if (hostId === me.id) { state.host_id = hostId; sync(); }
-        return;
-      }
-      if (!state.host_id) {
-        const newHost = ids.slice().sort()[0] || null;
-        hostId = newHost;
-        if (hostId === me.id) { state.host_id = hostId; sync(); }
-      }
-    }
-    function updateConnUI(ready){
-      isSubscribed = !!ready;
-      const joinBtn = $('joinBtn'); if (joinBtn) joinBtn.disabled = !ready;
-      if (!connBadge) return;
-      if (!ready) {
-        connBadge.textContent = 'Connecting…';
-        setBadge('connecting');
-        return;
-      }
-      const label = amHost() ? 'Connected • Host' : 'Connected • Guest';
-      connBadge.textContent = label;
-      setBadge('connected');
-      connBadge.classList.add(amHost() ? 'host' : 'guest');
-    }
-
-    /* ===== Render ===== */
-    function renderWheel(){
-      const ids = state.participants;
-      if (!ids.length){
-        wheelEl.style.background = 'conic-gradient(#334155 0 360deg)';
-        namesLayer.innerHTML=''; nextNameEl.textContent='—';
-        turnInfoEl.textContent=`${state.tracks_this_turn}/${state.tracks_per_turn}`;
-        rotatePointerToSlice(0);   // reset pointer
-        renderProgress();
-        return;
-      }
-      const n = ids.length;
-      const stops = ids.map((p,i)=>`${p.color} ${(i/n)*360}deg ${((i+1)/n)*360}deg`);
-      wheelEl.style.background = `conic-gradient(${stops.join(',')})`;
-      namesLayer.innerHTML='';
-      ids.forEach((p,i)=>{
-        const tag=document.createElement('div'); tag.className='name-tag';
-        tag.innerHTML = `<span class="avatar">${AVATAR_EMOJI[p.avatar]||'🎧'}</span>${p.name}`;
-        const angle = (i/n)*360 + (180/n);
-        tag.style.transform = `rotate(${angle}deg) translateY(calc(var(--wheel-size) * -0.34)) rotate(${-angle}deg)`;
-        namesLayer.appendChild(tag);
+    if (!participantsList.__bound) {
+      participantsList.__bound = true;
+      participantsList.addEventListener("click", (e) => {
+        if (!amHost()) return;
+        const t = e.target;
+        if (!(t instanceof HTMLElement)) return;
+        const upId = t.getAttribute("data-up");
+        const dnId = t.getAttribute("data-dn");
+        const rmId = t.getAttribute("data-rm");
+        if (upId) return broadcast("move", { id: upId, delta: -1 });
+        if (dnId) return broadcast("move", { id: dnId, delta: +1 });
+        if (rmId) return broadcast("remove", { id: rmId });
       });
-      // Rotate only the pointer ring to the start of the active slice
-      const sliceDeg = 360 / n;
-      const startDeg = (state.active_index % n) * sliceDeg;
-      rotatePointerToSlice(startDeg);
+    }
+  }
 
-      nextNameEl.textContent = ids[state.active_index]?.name || '—';
-      turnInfoEl.textContent = `${state.tracks_this_turn}/${state.tracks_per_turn}`;
+  function renderWheel() {
+    const ids = state.participants;
+    if (!ids.length) {
+      namesLayer.innerHTML = "";
+      nextNameEl.textContent = "—";
+      turnInfoEl.textContent = `0/${state.tracks_per_turn}`;
+      timerEl.textContent = formatMMSS(totalBudgetMs());
+      rotatePointerToSlice(0);
+      renderProgress();
+      return;
+    }
+    const n = ids.length;
+    const stops = ids.map(
+      (p, i) => `${p.color} ${(i / n) * 360}deg ${((i + 1) / n) * 360}deg`
+    );
+    wheelEl.style.background = `conic-gradient(${stops.join(",")})`;
+    namesLayer.innerHTML = "";
+    ids.forEach((p, i) => {
+      const tag = document.createElement("div");
+      tag.className = "name-tag";
+      tag.textContent = p.name;
+      const angle = (i / n) * 360 + 180 / n;
+      tag.style.transform = `rotate(${angle}deg) translateY(calc(var(--wheel-size) * -0.34)) rotate(${-angle}deg)`;
+      namesLayer.appendChild(tag);
+    });
+    const sliceDeg = 360 / n;
+    rotatePointerToSlice((state.active_index % n) * sliceDeg);
+    nextNameEl.textContent = ids[state.active_index]?.name || "—";
+    turnInfoEl.textContent = `${state.tracks_this_turn || 0}/${state.tracks_per_turn}`;
+    renderProgress();
+  }
+
+  // Sweep wedge + hand (progress within the active slice)
+  function renderProgress() {
+    if (!progressLayer || !sweepHand) return;
+
+    const n = state.participants.length;
+    if (!n) {
+      progressLayer.style.background = "none";
+      sweepHand.innerHTML = "";
+      return;
+    }
+    const sliceDeg = 360 / n;
+    const startDeg = (state.active_index % n) * sliceDeg;
+
+    // total budget is per-DJ: minutes * tracks_per_turn
+    const total = totalBudgetMs();
+    const elapsed = Math.max(0, total - Math.max(0, state.timer_ms || 0));
+    const frac = Math.max(0, Math.min(1, elapsed / total));
+    const endDeg = startDeg + frac * sliceDeg;
+
+    const dark =
+      state.phase === "grace" ? "rgba(239,68,68,.35)" : "rgba(2,6,23,.35)";
+    progressLayer.style.background = `conic-gradient(
+      transparent 0deg ${startDeg}deg,
+      ${dark} ${startDeg}deg ${endDeg}deg,
+      transparent ${endDeg}deg 360deg
+    )`;
+
+    sweepHand.innerHTML = `
+      <div style="
+        position:absolute; left:50%; top:50%;
+        width:2px; height:calc(var(--wheel-size)/2 - 10px);
+        background:${state.phase==='grace' ? '#ef4444' : '#e2e8f0'};
+        transform-origin: bottom center;
+        transform: translate(-50%,-100%) rotate(${endDeg}deg);
+        opacity:.95; border-radius:2px; box-shadow:0 0 6px rgba(0,0,0,.4);
+      "></div>
+    `;
+  }
+
+  function renderAll() {
+    renderParticipants();
+    renderWheel();
+    setStillBtnLabel();
+  }
+
+  // ----- Timer (host drives, guests display) -----
+  let rafId = null,
+    lastTick = null;
+
+  function startDJTurn() {
+    if (!amHost()) return;
+    state.phase = "running";
+    state.tracks_this_turn = 0;
+    state.timer_ms = totalBudgetMs();
+    lastTick = performance.now();
+    loop();
+    sync();
+  }
+
+  function extendPeriod(ms = msPerTrack()) {
+    if (!amHost()) return;
+    state.phase = "running";
+    state.timer_ms = Math.max(0, state.timer_ms || 0) + ms;
+    lastTick = performance.now();
+    loop();
+    sync();
+  }
+
+  function resetTurn() {
+    if (!amHost()) return;
+    cancelAnimationFrame(rafId);
+    state.phase = "idle";
+    state.timer_ms = totalBudgetMs();
+    timerEl.textContent = formatMMSS(state.timer_ms);
+    renderProgress();
+    sync();
+  }
+
+  function loop() {
+    cancelAnimationFrame(rafId);
+    const step = () => {
+      const now = performance.now();
+      const dt = now - (lastTick || now);
+      lastTick = now;
+      state.timer_ms = Math.max(0, (state.timer_ms || 0) - dt);
+      timerEl.textContent = formatMMSS(Math.floor(state.timer_ms));
+      renderProgress();
+      if (state.timer_ms <= 0) {
+        handOver();
+        return;
+      }
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+  }
+
+  function handOver() {
+    if (!amHost() || !state.participants.length) return;
+    state.active_index = (state.active_index + 1) % state.participants.length;
+    startDJTurn(); // full budget for next DJ
+    sync();
+  }
+
+  function sync() {
+    broadcast("state", state);
+  }
+
+  // ----- Channel setup -----
+  async function setupChannel(roomId) {
+    const room = roomId || sessionId;
+    if (!room) return;
+
+    if (channel && currentRoom && currentRoom !== room) {
+      try {
+        await channel.unsubscribe();
+      } catch {}
+      channel = null;
+      currentRoom = null;
+    }
+    if (channel && currentRoom === room) return;
+
+    channel = supabase.channel(`session:${room}`, {
+      config: { presence: { key: me.id } },
+    });
+    currentRoom = room;
+
+    // Host-only mutations
+    channel.on("broadcast", { event: "upsert" }, ({ payload }) => {
+      if (!amHost()) return;
+      const i = state.participants.findIndex((p) => p.id === payload.id);
+      if (i >= 0) state.participants[i] = payload;
+      else state.participants.push(payload);
+      renderAll();
+      sync();
+    });
+
+    channel.on("broadcast", { event: "remove" }, ({ payload }) => {
+      if (!amHost()) return;
+      const idx = state.participants.findIndex((p) => p.id === payload.id);
+      if (idx === -1) return;
+      state.participants.splice(idx, 1);
+      if (state.participants.length === 0) state.active_index = 0;
+      else if (idx < state.active_index) state.active_index -= 1;
+      else if (idx === state.active_index)
+        state.active_index = state.active_index % state.participants.length;
+      renderAll();
+      sync();
+    });
+
+    channel.on("broadcast", { event: "move" }, ({ payload }) => {
+      if (!amHost()) return;
+      const i = state.participants.findIndex((p) => p.id === payload.id);
+      if (i < 0) return;
+      const j = Math.max(
+        0,
+        Math.min(state.participants.length - 1, i + (payload.delta || 0))
+      );
+      if (i === j) return;
+      [state.participants[i], state.participants[j]] = [
+        state.participants[j],
+        state.participants[i],
+      ];
+      if (state.active_index === i) state.active_index = j;
+      else if (state.active_index === j) state.active_index = i;
+      renderAll();
+      sync();
+    });
+
+    channel.on("broadcast", { event: "tpt" }, ({ payload }) => {
+      if (!amHost()) return;
+      state.tracks_per_turn = payload.v || 1;
+      state.tracks_this_turn = 0;
+      renderAll();
+      sync();
+    });
+
+    channel.on("broadcast", { event: "mpt" }, ({ payload }) => {
+      if (!amHost()) return;
+      state.minutes_per_track = payload.v || 6;
+      setStillBtnLabel();
+      renderAll();
+      sync();
+    });
+
+    channel.on("broadcast", { event: "handover" }, () => {
+      if (amHost()) handOver();
+    });
+
+    // Snapshot handshake
+    channel.on("broadcast", { event: "req_state" }, () => {
+      if (amHost()) sync();
+    });
+
+    // Guests receive full state
+    channel.on("broadcast", { event: "state" }, ({ payload }) => {
+      if (amHost()) return; // host ignores its own echo
+      state = payload;
+      tracksSel.value = String(state.tracks_per_turn);
+      minutesSel.value = String(state.minutes_per_track);
+      renderAll();
+      timerEl.textContent = formatMMSS(
+        Math.floor(state.timer_ms || totalBudgetMs())
+      );
+    });
+
+    // Presence: elect/repair host only if missing
+    channel.on("presence", { event: "sync" }, () => {
+      const pres = channel.presenceState?.() || {};
+      const ids = Object.keys(pres);
+      if (!state.host_id) {
+        // First writer becomes host
+        if (ids.includes(me.id)) {
+          state.host_id = me.id;
+          sync();
+        }
+      } else if (!ids.includes(state.host_id)) {
+        // Host left — smallest UUID becomes host
+        const newHost = ids.slice().sort()[0] || null;
+        if (newHost && me.id === newHost) {
+          state.host_id = newHost;
+          sync();
+        }
+      }
+      renderParticipants();
+    });
+
+    await channel.subscribe(async (status) => {
+      console.log("[subscribe status]", status, "room=", room, "urlSessionId=", sessionId);
+      if (status !== "SUBSCRIBED") return;
+      isSubscribed = true;
+      await channel.track({ ...me });
+
+      // If no host yet (fresh room), take host and seed state
+      if (!state.host_id) {
+        state.host_id = me.id;
+        const i = state.participants.findIndex((p) => p.id === me.id);
+        if (i >= 0) state.participants[i] = me;
+        else state.participants.push(me);
+        tracksSel.value = String(state.tracks_per_turn);
+        minutesSel.value = String(state.minutes_per_track);
+        resetTurn(); // sets timer to totalBudgetMs
+        sync();
+      } else {
+        // Guest asks host for snapshot
+        broadcast("req_state", { ask: me.id });
+      }
+
+      renderAll();
+    });
+
+    // reconnect safety
+    channel.on("system", { event: "channel_closed" }, () => setupChannel(room));
+    channel.on("system", { event: "channel_error" }, () => setupChannel(room));
+  }
+
+  // ----- Actions -----
+  $("newSessionBtn").onclick = () => {
+    const id = crypto.randomUUID();
+    history.replaceState(null, "", `/s/${id}`);
+    sessionId = id;
+    state.host_id = me.id; // creator is host
+    setupChannel(sessionId);
+    resetTurn();
+    renderAll();
+  };
+
+  $("copyLinkBtn").onclick = async () => {
+    await navigator.clipboard.writeText(`${ENV.BASE_URL}/s/${sessionId || ""}`);
+    toast("Link copied");
+  };
+
+  $("joinBtn").onclick = () => {
+    me.name = $("profileName").value.trim() || "DJ";
+    me.avatar = $("avatarPick").value || "ninja";
+    me.color = $("colorPick").value || "#7c3aed";
+    saveMe();
+    if (!sessionId) {
+      toast("Create a session first");
+      return;
+    }
+    if (!isSubscribed) {
+      toast("Connecting… try again");
+      return;
+    }
+
+    channel.track({ ...me });
+    if (amHost()) {
+      const i = state.participants.findIndex((p) => p.id === me.id);
+      if (i >= 0) state.participants[i] = me;
+      else state.participants.push(me);
+      renderAll();
+      sync();
+    } else {
+      broadcast("upsert", { ...me });
+    }
+  };
+
+  $("addGuestBtn").onclick = () => {
+    if (!amHost()) return toast("Only host can add players here");
+    const name = prompt("Guest DJ name?");
+    if (!name) return;
+    const ghost = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      avatar: "spaceman",
+      color: "#22d3ee",
+    };
+    state.participants.push(ghost);
+    renderAll();
+    sync();
+  };
+
+  $("handOverBtn").onclick = () =>
+    amHost() ? handOver() : broadcast("handover", {});
+  $("stillBtn").onclick = () =>
+    amHost() ? extendPeriod(msPerTrack()) : null;
+  $("resetBtn").onclick = () => (amHost() ? resetTurn() : null);
+  $("removeActiveBtn").onclick = () => {
+    if (!amHost()) return;
+    const active = state.participants[state.active_index];
+    if (active) broadcast("remove", { id: active.id });
+  };
+
+  tracksSel.onchange = (e) => {
+    const v = parseInt(e.target.value || "1", 10);
+    if (!amHost()) {
+      tracksSel.value = String(state.tracks_per_turn);
+      return toast("Host only");
+    }
+    state.tracks_per_turn = Math.max(1, Math.min(3, v));
+    setStillBtnLabel();
+    renderAll();
+    sync();
+  };
+
+  minutesSel.onchange = (e) => {
+    const v = parseInt(e.target.value || "6", 10);
+    if (!amHost()) {
+      minutesSel.value = String(state.minutes_per_track);
+      return toast("Host only");
+    }
+    state.minutes_per_track = Math.max(1, Math.min(60, v));
+    setStillBtnLabel();
+    if (state.phase === "idle") {
+      timerEl.textContent = formatMMSS(totalBudgetMs());
       renderProgress();
     }
+    broadcast("mpt", { v: state.minutes_per_track }); // guests adopt immediately
+    renderAll();
+    sync();
+  };
 
-    function rotatePointerToSlice(startDeg){
-      if (!pointerRing) return;
-      pointerRing.style.transform = `rotate(${startDeg}deg)`;
-    }
+  // ----- Init -----
+  (function init() {
+    $("profileName").value = me.name || "";
+    $("avatarPick").value = me.avatar || "ninja";
+    $("colorPick").value = me.color || "#7c3aed";
+    tracksSel.value = String(state.tracks_per_turn);
+    minutesSel.value = String(state.minutes_per_track);
+    setStillBtnLabel();
 
-    function renderParticipants(){
-      const el=$('participantsList'); el.innerHTML='';
-      state.participants.forEach((p,i)=>{
-        const row=document.createElement('div'); row.className='item';
-        row.innerHTML = `
-          <div>${AVATAR_EMOJI[p.avatar]||'🎧'} ${p.name}
-            <span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid #1f2a44;background:${p.color};margin-left:6px;"></span>
-            <small class="muted"> (pos ${i+1}) ${p.id===hostId?' • Host':''}</small>
-          </div>
-          <div class="row">
-            ${amHost()?`<button class="secondary" data-up="${p.id}">↑</button>
-            <button class="secondary" data-dn="${p.id}">↓</button>
-            <button class="danger" data-rm="${p.id}">Remove</button>`:''}
-          </div>`;
-        el.appendChild(row);
-      });
-      // Delegated controls
-      (function attachRosterDelegation(){
-        if (el.__bound) return; el.__bound = true;
-        el.addEventListener('click', (e)=>{
-          if (!amHost()) return;
-          const t = e.target;
-          if (!(t instanceof HTMLElement)) return;
-          const upId = t.getAttribute('data-up');
-          const dnId = t.getAttribute('data-dn');
-          const rmId = t.getAttribute('data-rm');
-          if (upId)  { broadcast('move',   { id: upId,  delta: -1 }); return; }
-          if (dnId)  { broadcast('move',   { id: dnId,  delta: +1 }); return; }
-          if (rmId)  { broadcast('remove', { id: rmId });             return; }
-        });
-      })();
-    }
-    function renderAll(){ pickHostFromPresence(); renderParticipants(); renderWheel(); }
-
-    /* ===== Progress wedge + sweep hand ===== */
-    function renderProgress(){
-      const overlay = document.getElementById('progressLayer');
-      const hand    = document.getElementById('sweepHand');
-      if (!overlay || !hand) return;
-
-      const n = state.participants.length;
-      if (!n) { overlay.style.background='none'; hand.innerHTML=''; return; }
-
-      const phaseTotal = state.phase === 'grace' ? GRACE_MS : PERIOD_MS;
-      const elapsed    = Math.max(0, phaseTotal - Math.max(0, state.timer_ms || 0));
-      const frac       = Math.max(0, Math.min(1, elapsed / phaseTotal)); // 0..1
-
-      const sliceDeg   = 360 / n;
-      const startDeg   = (state.active_index % n) * sliceDeg;
-      const fillDeg    = frac * sliceDeg;
-      const endDeg     = startDeg + fillDeg;
-
-      const dark = state.phase === 'grace' ? 'rgba(239,68,68,.35)' : 'rgba(2,6,23,.35)';
-      overlay.style.background = `conic-gradient(
-        transparent 0deg ${startDeg}deg,
-        ${dark} ${startDeg}deg ${endDeg}deg,
-        transparent ${endDeg}deg 360deg
-      )`;
-
-      document.querySelector('.center-label')?.style?.setProperty(
-        'border-color',
-        state.phase === 'grace' ? '#7f1d1d' : '#334155'
-      );
-
-      hand.innerHTML = `
-        <div style="
-          position:absolute; left:50%; top:50%;
-          width:2px; height:calc(var(--wheel-size) / 2 - 10px);
-          background:${state.phase==='grace' ? '#ef4444' : '#e2e8f0'};
-          transform-origin: bottom center;
-          transform: translate(-50%,-100%) rotate(${endDeg}deg);
-          opacity:.95; border-radius:2px; box-shadow:0 0 6px rgba(0,0,0,.4);
-        "></div>
-      `;
-    }
-
-    /* ===== Timer ===== */
-    let rafId=null, lastTick=null;
-    function startPeriod(){ if(!amHost()) return; state.phase="running"; state.timer_ms=PERIOD_MS; lastTick=performance.now(); loop(); sync(); }
-    function startGrace(){ if(!amHost()) return; state.phase="grace"; state.timer_ms=GRACE_MS; lastTick=performance.now(); loop(); sync(); }
-    function extendPeriod(ms = PERIOD_MS){ if(!amHost()) return; state.phase='running'; state.timer_ms = Math.max(0, state.timer_ms||0) + ms; lastTick=performance.now(); loop(); sync(); }
-    function resetTurn(){ if(!amHost()) return; cancelAnimationFrame(rafId); state.tracks_this_turn=0; state.phase='idle'; state.timer_ms=PERIOD_MS; renderTimer(); renderProgress(); sync(); }
-    function loop(){
-      cancelAnimationFrame(rafId);
-      const step = ()=>{
-        const now=performance.now(); const dt=now-(lastTick||now); lastTick=now;
-        state.timer_ms=Math.max(0,(state.timer_ms||0)-dt);
-        renderTimer(); renderProgress();
-        if(state.timer_ms<=0){
-          if(state.phase==='running') startGrace();
-          else if(state.phase==='grace') handOver();
-          return;
-        }
-        rafId=requestAnimationFrame(step);
-      };
-      rafId=requestAnimationFrame(step);
-    }
-    function renderTimer(){
-      const ms = Math.max(0, Math.floor(state.timer_ms||0));
-      const m = Math.floor(ms/60000); const s = Math.floor((ms%60000)/1000);
-      timerEl.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-    }
-    function sync(){ broadcast('state', state); }
-
-    /* ===== Actions ===== */
-    on('newSessionBtn','click', async ()=>{
-      const id = crypto.randomUUID();
-      history.replaceState(null,"",`/s/${id}`);
-      sessionId = id;
-      hostId = me.id;
-      state.host_id = hostId;           // authoritative
+    if (sessionId) {
       setupChannel(sessionId);
-    });
-    on('copyLinkBtn','click', async ()=>{
-      if(!sessionId) return alert("Create a session first");
-      await navigator.clipboard.writeText(`${ENV.BASE_URL}/s/${sessionId}`); toast("Link copied");
-    });
-    on('tracksPerTurn','change',(e)=>{
-      const v = parseInt(e.target.value || '1', 10);
-      if (!amHost()) { e.target.value = String(state.tracks_per_turn); return toast('Only the host can change tracks per turn.'); }
-      state.tracks_per_turn = Math.max(1, Math.min(3, v));
-      state.tracks_this_turn = 0;
-      renderAll(); sync();
-    });
-    on('removeActiveBtn','click',()=>{
-      if (!amHost()) return;
-      const active = state.participants[state.active_index];
-      if (active) broadcast('remove', { id: active.id });
-    });
-    on('handOverBtn','click',()=>{ if (amHost()) handOver(); else broadcast('handover',{}); });
-    on('stillBtn','click',()=>{ if (amHost()) extendPeriod(PERIOD_MS); });
-    on('resetBtn','click',()=>{ if (amHost()) resetTurn(); });
-    on('joinBtn','click',()=>{
-      if (!sessionId) return toast("Create a session first (New Session) or open a session link.");
-      if (!channel || !isSubscribed) return toast("Connecting… try Join again in a second.");
-      me.name   = $('profileName').value.trim() || 'DJ';
-      me.avatar = $('avatarPick').value || 'ninja';
-      me.color  = $('colorPick').value || '#7c3aed';
-      saveMe();
-      channel.track({ ...me });
-      if (amHost()) {
-        const i = state.participants.findIndex(p => p.id === me.id);
-        if (i >= 0) state.participants[i] = me; else state.participants.push(me);
-        renderAll(); sync();
-      } else {
-        broadcast('upsert', { ...me });
-      }
-      setupPush(); // try to register push after joining
-    });
-
-    function handOver(){
-      if(!amHost()) return;
-      if(!state.participants.length) return;
-      if (state.tracks_this_turn + 1 >= state.tracks_per_turn) {
-        state.tracks_this_turn = 0;
-        state.active_index = (state.active_index + 1) % state.participants.length;
-      } else {
-        state.tracks_this_turn++;
-      }
-      const next = state.participants[state.active_index];
-      startPeriod(); sync();
-      if (next) notifyNextDJ(next); // push notify next DJ
     }
+  })();
+</script>
 
-    /* ===== Realtime setup ===== */
-    async function setupChannel(roomId) {
-      const targetRoom = roomId || sessionId;
-      if (!targetRoom) return;
-
-      updateConnUI(false);
-
-      if (channel && channelRoomId && channelRoomId !== targetRoom) {
-        try { await channel.unsubscribe(); } catch {}
-        channel = null; channelRoomId = null;
-      }
-      if (channel && channelRoomId === targetRoom) return;
-
-      const topic = `session:${targetRoom}`;
-      channel = supabase.channel(topic, { config: { presence: { key: me.id } } });
-      channelRoomId = targetRoom;
-
-      // Host-only mutations
-      channel.on('broadcast', { event: 'upsert' }, ({ payload }) => {
-        if (!amHost()) return;
-        const i = state.participants.findIndex(p => p.id === payload.id);
-        if (i >= 0) state.participants[i] = payload; else state.participants.push(payload);
-        renderAll(); sync();
-      });
-      channel.on('broadcast', { event: 'remove' }, ({ payload }) => {
-        if (!amHost()) return;
-        const idx = state.participants.findIndex(p => p.id === payload.id);
-        if (idx === -1) return;
-        state.participants.splice(idx, 1);
-        if (state.participants.length === 0) state.active_index = 0;
-        else if (idx < state.active_index) state.active_index -= 1;
-        else if (idx === state.active_index) state.active_index = state.active_index % state.participants.length;
-        renderAll(); sync();
-      });
-      channel.on('broadcast', { event: 'move' }, ({ payload }) => {
-        if (!amHost()) return;
-        const i = state.participants.findIndex(p => p.id === payload.id);
-        if (i < 0) return;
-        const j = Math.max(0, Math.min(state.participants.length - 1, i + (payload.delta || 0)));
-        if (i === j) return;
-        [state.participants[i], state.participants[j]] = [state.participants[j], state.participants[i]];
-        if (state.active_index === i) state.active_index = j;
-        else if (state.active_index === j) state.active_index = i;
-        renderAll(); sync();
-      });
-      channel.on('broadcast', { event: 'tpt' }, ({ payload }) => {
-        if (!amHost()) return;
-        state.tracks_per_turn = payload.v || 1;
-        state.tracks_this_turn = 0; renderAll(); sync();
-      });
-      channel.on('broadcast', { event: 'handover' }, () => { if (amHost()) handOver(); });
-
-      // Snapshot handshake
-      channel.on('broadcast', { event: 'req_state' }, () => { if (amHost()) sync(); });
-
-      // Guests receive authoritative state
-      channel.on('broadcast', { event: 'state' }, ({ payload }) => {
-        if (amHost()) return;
-        state = payload;
-        hostId = state.host_id || hostId; // adopt host
-        const tptEl = $('tracksPerTurn'); if (tptEl) tptEl.value = String(state.tracks_per_turn);
-        renderAll(); renderTimer();
-      });
-
-      // Presence
-      channel.on('presence', { event: 'sync' }, () => {
-        pickHostFromPresence();
-        renderParticipants();
-        updateConnUI(isSubscribed);
-      });
-      channel.on('presence', { event: 'join' }, () => {
-        pickHostFromPresence();
-        if (amHost()) sync();
-      });
-
-      await channel.subscribe(async (status) => {
-        console.log('[subscribe status]', status, 'room=', targetRoom, 'urlSessionId=', sessionId);
-        if (channelRoomId !== targetRoom) return;
-        if (status === 'SUBSCRIBED') {
-          updateConnUI(true);
-          await channel.track({ ...me });
-
-          if (amHost()) {
-            const i = state.participants.findIndex(p => p.id === me.id);
-            if (i >= 0) state.participants[i] = me; else state.participants.push(me);
-            state.participants ||= [];
-            const tptEl = $('tracksPerTurn'); if (tptEl) tptEl.value = String(state.tracks_per_turn);
-            sync();
-            startPeriod();
-          } else {
-            broadcast('req_state', { ask: me.id }); // guests ask for snapshot
-          }
-
-          renderAll(); renderTimer();
-        }
-      });
-
-      // Reconnect same room
-      channel.on('system', { event: 'channel_closed' }, () => {
-        if (channelRoomId === targetRoom) { console.warn('channel_closed — reconnecting'); setupChannel(targetRoom); }
-      });
-      channel.on('system', { event: 'channel_error' },  () => {
-        if (channelRoomId === targetRoom) { console.warn('channel_error — reconnecting');  setupChannel(targetRoom); }
-      });
-    }
-
-    // Heartbeat rebroadcast
-    if (!window.__djHeartbeat) {
-      window.__djHeartbeat = setInterval(() => {
-        if (amHost() && channel && isSubscribed && channelRoomId === sessionId) sync();
-      }, 3000);
-    }
-
-    /* ===== Push: capture player ID + notify next DJ ===== */
-    async function setupPush(){
-      try {
-        if (!('OneSignal' in window)) return;
-        const res = await OneSignal.Notifications.requestPermission();
-        if (res !== 'granted') return;
-        await OneSignal.Notifications.requestPermission(); // idempotent
-        const playerId = await OneSignal.User.getId();
-        if (!playerId) return;
-        await supabase.from('push_tokens').upsert({
-          profile_local_id: me.id,
-          onesignal_player_id: playerId,
-          last_seen_at: new Date().toISOString()
-        }, { onConflict: 'profile_local_id' });
-      } catch (e) {
-        console.warn('push setup failed', e);
-      }
-    }
-
-    async function notifyNextDJ(nextParticipant){
-      try {
-        const { data, error } = await supabase
-          .from('push_tokens')
-          .select('onesignal_player_id')
-          .eq('profile_local_id', nextParticipant.id)
-          .maybeSingle();
-        if (error || !data?.onesignal_player_id) return;
-
-        await fetch(`${ENV.SUPABASE_URL.replace('.co', '.co/functions/v1')}/send-turn-push`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            playerId: data.onesignal_player_id,
-            title: 'You’re up next 🎧',
-            message: `${nextParticipant.name || 'DJ'} — it’s your turn!`,
-            url: `${ENV.BASE_URL}/s/${sessionId}`
-          })
-        });
-      } catch (e) {
-        console.warn('notifyNextDJ failed', e);
-      }
-    }
-
-    /* ===== Toast & Init ===== */
-    function toast(msg){
-      const t = document.createElement('div');
-      t.style.cssText = "position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#0b1224;color:#e2e8f0;padding:10px 14px;border-radius:8px;border:1px solid #1f2a44;box-shadow:0 8px 20px rgba(0,0,0,.35)";
-      t.textContent = msg; document.body.appendChild(t);
-      setTimeout(()=>t.remove(),1800);
-    }
-
-    (async function init(){
-      $('profileName').value = me.name || "";
-      $('avatarPick').value  = me.avatar || "ninja";
-      $('colorPick').value   = me.color || "#7c3aed";
-      const joinBtn = $('joinBtn'); if (joinBtn) joinBtn.disabled = true;
-
-      if (sessionId) { console.log('joining existing session', sessionId); setupChannel(sessionId); }
-      else updateConnUI(false);
-
-      setupPush(); // attempt push set-up (optional for guests)
-    })();
-  </script>
-
-  <!-- OneSignal Push (kept) -->
-  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-  <script>
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    OneSignalDeferred.push(async function(OneSignal) {
-      await OneSignal.init({ appId: "5060d504-c36b-4330-a408-b905427c79a0" });
-    });
-  </script>
-</body>
-</html>
 
 
 
