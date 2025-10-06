@@ -194,7 +194,7 @@
         console.error('[FATAL]', msg);
       } catch {}
     }
-    window.addEventListener('error', (e)=> showFatal(e.message + '\\n' + (e.filename||'') + ':' + (e.lineno||'') ));
+    window.addEventListener('error', (e)=> showFatal(e.message + '\n' + (e.filename||'') + ':' + (e.lineno||'') ));
     window.addEventListener('unhandledrejection', (e)=> showFatal('Unhandled promise rejection: ' + (e.reason?.message || e.reason)));
 
     /* ===== ENV & Libs ===== */
@@ -247,7 +247,11 @@
     let isSubscribed = false;
 
     /* ===== Helpers ===== */
-    function getSessionIdFromPath(){ const m=location.pathname.match(/\\/s\\/([0-9a-fA-F-]+)/); return m?m[1]:null; }
+    function getSessionIdFromPath(){
+      // matches /s/<uuid>
+      const m = location.pathname.match(/\/s\/([0-9a-fA-F-]+)/);
+      return m ? m[1] : null;
+    }
     function saveMe(){ localStorage.setItem(LS, JSON.stringify(me)); }
     function amHost(){ return !!hostId && me.id === hostId; }
     function setBadge(state){
@@ -297,7 +301,7 @@
         wheelEl.style.background = 'conic-gradient(#334155 0 360deg)';
         namesLayer.innerHTML=''; nextNameEl.textContent='—';
         turnInfoEl.textContent=`${state.tracks_this_turn}/${state.tracks_per_turn}`;
-        rotatePointerToSlice(0, 1);   // reset pointer
+        rotatePointerToSlice(0);   // reset pointer
         renderProgress();
         return;
       }
@@ -312,19 +316,18 @@
         tag.style.transform = `rotate(${angle}deg) translateY(calc(var(--wheel-size) * -0.34)) rotate(${-angle}deg)`;
         namesLayer.appendChild(tag);
       });
-      // Do NOT rotate wheel. Rotate the pointer ring to the active slice start.
+      // Rotate only the pointer ring to the start of the active slice
       const sliceDeg = 360 / n;
       const startDeg = (state.active_index % n) * sliceDeg;
-      rotatePointerToSlice(startDeg, n);
+      rotatePointerToSlice(startDeg);
 
       nextNameEl.textContent = ids[state.active_index]?.name || '—';
       turnInfoEl.textContent = `${state.tracks_this_turn}/${state.tracks_per_turn}`;
       renderProgress();
     }
 
-    function rotatePointerToSlice(startDeg, n){
+    function rotatePointerToSlice(startDeg){
       if (!pointerRing) return;
-      // The triangle sits at “top”; rotate ring so it points to the start of active slice.
       pointerRing.style.transform = `rotate(${startDeg}deg)`;
     }
 
@@ -475,8 +478,7 @@
       } else {
         broadcast('upsert', { ...me });
       }
-      // Try to register push after join (if allowed)
-      setupPush();
+      setupPush(); // try to register push after joining
     });
 
     function handOver(){
@@ -627,7 +629,6 @@
 
     async function notifyNextDJ(nextParticipant){
       try {
-        // Look up push token
         const { data, error } = await supabase
           .from('push_tokens')
           .select('onesignal_player_id')
@@ -667,8 +668,7 @@
       if (sessionId) { console.log('joining existing session', sessionId); setupChannel(sessionId); }
       else updateConnUI(false);
 
-      // Try push set-up at load (user may decline; it's fine)
-      setupPush();
+      setupPush(); // attempt push set-up (optional for guests)
     })();
   </script>
 
@@ -682,5 +682,6 @@
   </script>
 </body>
 </html>
+
 
 
