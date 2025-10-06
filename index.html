@@ -289,83 +289,154 @@ $('joinBtn').onclick = () => {
       sync();
     }
 
-    // ----- Supabase channel setup -----
-    async function setupChannel(){
-      channel?.unsubscribe();
-        isSubscribed = false;   
-      const topic = `session:${sessionId}`;
-      channel = supabase.channel(topic, {
-        config: { presence: { key: me.id } }
-      });
+   // -----------------------------------------
+// Add this once near your other globals:
+if (typeof isSubscribed === 'undefined') {
+  window.isSubscribed = false; // avoid re-declare if you already added it
+}
+// -----------------------------------------
 
-      channel.on('broadcast', { event:'state' }, ({ payload })=>{
-        if(isHost()) return; state = payload; renderAll(); renderTimer();
-      });
-      channel.on('broadcast', { event:'upsert' }, ({ payload })=>{
-        if(!isHost()) return;
-        const i = state.participants.findIndex(p=>p.id===payload.id);
-        if (i>=0) state.participants[i] = payload;
-        else state.participants.push(payload);
-        sync(); renderAll();
-      });
-      channel.on('broadcast', { event:'remove' }, ({ payload })=>{
-        if(!isHost()) return;
-        state.participants = state.participants.filter(p=>p.id!==payload.id);
-        if (state.active_index >= state.participants.length) state.active_index = 0;
-        sync(); renderAll();
-      });
-      channel.on('broadcast', { event:'move' }, ({ payload })=>{
-        if(!isHost()) return;
-        const i = state.participants.findIndex(p=>p.id===payload.id);
-        const j = i + (payload.delta||0);
-        if(i<0||j<0||j>=state.participants.length) return;
-        [state.participants[i], state.participants[j]] = [state.participants[j], state.participants[i]];
-        sync(); renderAll();
-      });
-      channel.on('broadcast', { event:'tpt' }, ({ payload })=>{
-        if(!isHost()) return;
-        state.tracks_per_turn = payload.v || 1;
-        state.tracks_this_turn = 0; sync(); renderAll();
-      });
-      channel.on('broadcast', { event:'handover' }, ()=>{
-        if (!isHost()) return;
-        handOver(false);
-      });
+// ----- Supabase channel setup -----
+async function setupChannel() {
+  isSubscribed = false;
 
-      channel.on('presence', { event: 'sync' }, ()=>{
-        // Determine/confirm host
-        const pres = channel.presenceState();
-        const ids = Object.keys(pres || {});
-        if (!hostId) hostId = ids.slice().sort()[0] || me.id;
-        // Show “live” users by lighting up names (optional)
-        renderParticipants();
-      });
+  // tear down old channel
+  try { channel?.unsubscribe(); } catch {}
 
-    await channel.subscribe(async (status) => {
-  if (status !== 'SUBSCRIBED') return;
+  const topic = `session:${sessionId}`;
+  channel = supabase.channel(topic, {
+    config: { presence: { key: me.id } }
+  });
 
-  isSubscribed = true;                 // ready
-  await channel.track({ ...me });      // presence
+  // --- Host-only mutations, then broadcast full state ---
+  channel.on('broadcast', { event: 'upsert' }, ({ payload }) => {
+    if (!isHost()) return;
+    const i = state.participants.findIndex(p => p.id === payload.id);
+    if (i >= 0) state.participants[i] = payload;
+    else state.participants.push(payload);
+    renderAll();
+    sync(); // send full state to everyone
+  });
 
-  // First joiner becomes host
-  if (!hostId) hostId = me.id;
+  channel.on('broadcast', { event: 'remove' }, ({ payload }) => {
+    if (!isHost()) return;
+    state.participants = state.participants.filter(p => p.id !== payload.id);
+    if (state.active_index >= state.participants.length) state.active_index = 0;
+    renderAll();
+    sync();
+  });
+
+  channel.on('broadcast', { event: 'move' }, ({ payload }) => {
+    if (!isHost()) return;
+    const i = state.participants.findIndex(p => p.id === payload.id);
+    const j = i + (payload.delta || 0);
+    if (i < 0 || j < 0 || j >= state.participants.length) return;
+    [state.participants[i], state.participants[j]] = [state.participants[j], state.participants[i]];
+    renderAll();
+    sync();
+  });
+
+  channel.on('broadcast', { event: 'tpt' }, ({ payload }) => {
+    if (!isHost()) return;
+    state.tracks_per_turn = payload.v || 1;
+    state.tracks_this_turn = 0;
+    renderAll();
+    sync();
+  });
+
+  channel.on('broadcast', { event: 'handover' }, () => {
+    if (!isHost()) return;
+    handOver(false);
+  });
+
+  // --- Non-hosts receive the authoritative state from host ---
+  channel.on('broadcast', { event: 'state' }, ({ payload }) => {
+    if (isHost()) return;           // host is the source of truth
+    state = payload;
+    renderAll();
+    renderTimer();
+  });
+
+  // --- Presence: who is online (optional UI) ---
+  channel.on('presence', { event: 'sync' }, () => {
+    const pres = channel.presenceState();
+    const ids = Object.keys(pres || {});
+    if (!hostId || !ids.includes(hostId)) {
+      hostId = ids.slice().sort()[0] || me.id; // smallest UUID wins
+    }
+    renderParticipants();
+  });
+
+  // --- Subscribe & announce presence ---
+  await channel.subscribe(async (status) => {
+    if (status === 'SUBSCRIBED') {
+      isSubscribed = true;
+
+      // announce myself
+      await channel.track({ ...me });
+
+      // first joiner becomes host
+      if (!hostId) hostId = me.id;
+
+      if (isHost()) {
+        // ensure host is in the list
+        const i = state.participants.findIndex(p => p.id === me.id);
+        if (i >= 0) state.participants[i] = me;
+        else state.participants.push(me);
+
+        // nudge initial state & start timer window
+        state.participants ||= [];
+        const tptEl = document.getElementById('tracksPerTurn');
+        if (tptEl) tptEl.value = String(state.tracks_per_turn);
+        sync();        // broadcast full state
+        startPeriod(); // start timer
+      }
+
+      renderAll();
+      renderTimer();
+    }
+  });
+}
+
+// Heartbeat (optional): host rebroadcasts every 10s for reliability
+if (!window.__djHeartbeat) {
+  window.__djHeartbeat = setInterval(() => {
+    if (isHost() && channel && isSubscribed) sync();
+  }, 10000);
+}
+
+// ----- Join / Update -----
+$('joinBtn').onclick = () => {
+  if (!sessionId) {
+    toast("Create a session first (New Session) or open a session link.");
+    return;
+  }
+  if (!channel || !isSubscribed) {
+    toast("Connecting… try Join again in a second.");
+    return;
+  }
+
+  me.name   = $('profileName').value.trim() || 'DJ';
+  me.avatar = $('avatarPick').value || 'ninja';
+  me.color  = $('colorPick').value || '#b14cff';
+  saveMe();
+
+  // presence update (safe to repeat)
+  channel.track({ ...me });
 
   if (isHost()) {
-    // ensure participants array exists
-    state.participants ||= [];
-
-    // ensure host is in the list (upsert)
+    // update local and broadcast full state
     const i = state.participants.findIndex(p => p.id === me.id);
     if (i >= 0) state.participants[i] = me;
     else state.participants.push(me);
-
-    // reflect current UI control and start timer window
-    $('tracksPerTurn').value = String(state.tracks_per_turn);
-    startPeriod();
-
-    // broadcast full state to everyone
+    renderAll();
     sync();
+  } else {
+    // ask host to upsert me
+    broadcast('upsert', { ...me });
   }
+};
+
 
   // update my UI
   renderAll();
