@@ -141,7 +141,7 @@
     // ----- Helpers / constants -----
     const $ = (id)=>document.getElementById(id);
     const AVATAR_EMOJI = { ninja:'🥷', robot:'🤖', demon:'😈', angel:'😇', alien:'👽', pirate:'🏴‍☠️', wizard:'🧙‍♂️', spaceman:'🧑‍🚀' };
-    const LS = "djwheel_rt_v5";
+    const LS = "djwheel_rt_v6";
     const fmt = (ms)=>{ const m=Math.floor(ms/60000), s=Math.floor((ms%60000)/1000); return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; };
     const sessionFromPath = ()=> { const m=location.pathname.match(/\/s\/([0-9a-fA-F-]+)/); return m?m[1]:null; };
     const toast = (msg)=>{ const t=document.createElement('div'); t.style.cssText="position:fixed;bottom:14px;left:50%;transform:translateX(-50%);background:#0b1224;color:#e2e8f0;padding:10px 14px;border-radius:8px;border:1px solid #1f2a44;z-index:9999"; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),1600); };
@@ -214,15 +214,20 @@
       if (!participantsList.__bound){
         participantsList.__bound = true;
         participantsList.addEventListener('click', (e)=>{
-          if (!amHost()) return;
           const btn = (e.target instanceof HTMLElement) ? e.target.closest('button') : null;
           if (!btn) return;
           const upId = btn.getAttribute('data-up');
           const dnId = btn.getAttribute('data-dn');
           const rmId = btn.getAttribute('data-rm');
-          if (upId) { console.log('[UI] move up', upId); return broadcast('move', { id:upId, delta:-1 }); }
-          if (dnId) { console.log('[UI] move dn', dnId); return broadcast('move', { id:dnId, delta:+1 }); }
-          if (rmId) { console.log('[UI] remove', rmId); return broadcast('remove', { id:rmId }); }
+          if (amHost()){
+            if (upId) return hostMoveParticipant(upId, -1);
+            if (dnId) return hostMoveParticipant(dnId, +1);
+            if (rmId) return hostRemoveParticipant(rmId);
+          } else {
+            if (upId) return broadcast('move',   { id: upId, delta: -1 });
+            if (dnId) return broadcast('move',   { id: dnId, delta: +1 });
+            if (rmId) return broadcast('remove', { id: rmId });
+          }
         });
       }
     }
@@ -278,34 +283,9 @@
 
     function renderAll(){ renderParticipants(); renderWheel(); setStillBtnLabel(); }
 
-    // ----- Timer (host drives) -----
-    let rafId=null, lastTick=null;
-    function startDJTurn(){
-      if(!amHost()) return;
-      state.phase='running';
-      state.tracks_this_turn=0;
-      state.turn_total_ms = totalBudgetMs();   // freeze total for this turn
-      state.timer_ms      = state.turn_total_ms;
-      lastTick=performance.now();
-      loop(); sync();
-    }
-    function extendPeriod(ms = msPerTrack()){
-      if(!amHost()) return;
-      state.phase='running';
-      state.turn_total_ms += ms;               // keep denom in sync
-      state.timer_ms      += ms;               // add to remaining
-      lastTick=performance.now();
-      loop(); sync();
-    }
-    function resetTurn(){
-      if(!amHost()) return;
-      cancelAnimationFrame(rafId);
-      state.phase='idle';
-      state.turn_total_ms = totalBudgetMs();
-      state.timer_ms      = state.turn_total_ms;
-      timerEl.textContent=fmt(state.timer_ms);
-      renderProgress(); sync();
-    }
+    // ----- Timer (host drives) + guest animation -----
+    let rafId=null, lastTick=null, lastTurnStartMs=0, handoverConfirmArmed=false;
+
     function loop(){
       cancelAnimationFrame(rafId);
       const step=()=>{
@@ -318,15 +298,89 @@
       };
       rafId=requestAnimationFrame(step);
     }
+
+    function startGuestLoop(){
+      if (amHost()) return;            // guests animate locally
+      cancelAnimationFrame(rafId);
+      const step = ()=>{
+        if (!state.timer_ms) return;
+        state.timer_ms = Math.max(0, state.timer_ms - 1000/30); // ~30fps
+        timerEl.textContent = fmt(Math.floor(state.timer_ms));
+        renderProgress();
+        rafId = requestAnimationFrame(step);
+      };
+      rafId = requestAnimationFrame(step);
+    }
+
+    function startDJTurn(){
+      if(!amHost()) return;
+      state.phase = 'running';
+      state.tracks_this_turn = 0;
+      state.turn_total_ms = totalBudgetMs();   // freeze total for this turn
+      state.timer_ms      = state.turn_total_ms;
+      lastTurnStartMs = Date.now();
+
+      renderAll();                              // pointer & Next Up update now
+      lastTick = performance.now();
+      loop();
+      sync();
+    }
+
+    function extendPeriod(ms = msPerTrack()){
+      if(!amHost()) return;
+      state.phase='running';
+      state.turn_total_ms += ms;               // keep denom in sync
+      state.timer_ms      += ms;               // add to remaining
+      lastTick=performance.now();
+      loop(); sync();
+    }
+
+    function resetTurn(){
+      if(!amHost()) return;
+      cancelAnimationFrame(rafId);
+      state.phase='idle';
+      state.turn_total_ms = totalBudgetMs();
+      state.timer_ms      = state.turn_total_ms;
+      timerEl.textContent=fmt(state.timer_ms);
+      renderProgress(); sync();
+    }
+
     function handOver(){
       if(!amHost()||!state.participants.length) return;
       state.active_index=(state.active_index+1)%state.participants.length;
-      startDJTurn();
+      renderAll();                              // update pointer/Next Up now
+      startDJTurn();                            // timer + loop
       const next = state.participants[state.active_index];
-      if (next) notifyNextDJ(next);   // push (no-op if not configured)
-      sync();
+      if (next) notifyNextDJ(next);            // push (no-op if not configured)
+      // sync() already in startDJTurn()
     }
+
     const sync = ()=> broadcast('state', state);
+
+    // ----- Host-local mutate helpers -----
+    function hostMoveParticipant(id, delta){
+      const i = state.participants.findIndex(p=>p.id===id);
+      if (i < 0) return;
+      const j = Math.max(0, Math.min(state.participants.length-1, i + (delta||0)));
+      if (i === j) return;
+      [state.participants[i], state.participants[j]] = [state.participants[j], state.participants[i]];
+      if (state.active_index === i) state.active_index = j;
+      else if (state.active_index === j) state.active_index = i;
+      renderAll(); sync();
+    }
+    function hostRemoveParticipant(id){
+      const idx = state.participants.findIndex(p=>p.id===id);
+      if (idx === -1) return;
+      state.participants.splice(idx, 1);
+      if (state.participants.length === 0) state.active_index = 0;
+      else if (idx < state.active_index) state.active_index -= 1;
+      else if (idx === state.active_index) state.active_index %= state.participants.length;
+      renderAll(); sync();
+    }
+    function isMyTurn(){
+      const p = state.participants[state.active_index];
+      return !!p && p.id === me.id;
+    }
 
     // ----- Channel setup -----
     async function setupChannel(roomId){
@@ -345,33 +399,25 @@
         renderAll(); sync();
       });
       channel.on('broadcast', { event:'remove' }, ({payload})=>{
-        if(!amHost())return;
-        const idx=state.participants.findIndex(p=>p.id===payload.id);
-        if(idx===-1) return;
-        state.participants.splice(idx,1);
-        if (state.participants.length===0) state.active_index=0;
-        else if (idx<state.active_index) state.active_index-=1;
-        else if (idx===state.active_index) state.active_index%=state.participants.length;
-        renderAll(); sync();
+        if(!amHost())return; hostRemoveParticipant(payload.id);
       });
       channel.on('broadcast', { event:'move' }, ({payload})=>{
-        if(!amHost())return;
-        const i=state.participants.findIndex(p=>p.id===payload.id); if(i<0) return;
-        const j=Math.max(0, Math.min(state.participants.length-1, i + (payload.delta||0))); if(i===j) return;
-        [state.participants[i], state.participants[j]]=[state.participants[j], state.participants[i]];
-        if (state.active_index===i) state.active_index=j; else if (state.active_index===j) state.active_index=i;
-        renderAll(); sync();
+        if(!amHost())return; hostMoveParticipant(payload.id, payload.delta);
       });
       channel.on('broadcast', { event:'tpt' }, ({payload})=>{
         if(!amHost())return; state.tracks_per_turn=payload.v||1; state.tracks_this_turn=0; renderAll(); sync();
       });
       channel.on('broadcast', { event:'mpt' }, ({payload})=>{
-        if(!amHost())return; state.minutes_per_track=payload.v||6; setStillBtnLabel(); if(state.phase==='idle'){ state.turn_total_ms=totalBudgetMs(); timerEl.textContent=fmt(state.turn_total_ms); renderProgress(); } renderAll(); sync();
+        if(!amHost())return; state.minutes_per_track=payload.v||6; setStillBtnLabel();
+        if(state.phase==='idle'){ state.turn_total_ms=totalBudgetMs(); timerEl.textContent=fmt(state.turn_total_ms); renderProgress(); }
+        renderAll(); sync();
       });
-      channel.on('broadcast', { event:'handover' }, ()=>{ if(amHost()) handOver(); });
+      channel.on('broadcast', { event:'handover' }, ()=>{
+        if (amHost()) handOver();
+      });
       channel.on('broadcast', { event:'req_state' }, ()=>{ if(amHost()) sync(); });
 
-      // Guests adopt full state
+      // Guests adopt full state + start local animation
       channel.on('broadcast', { event:'state' }, ({payload})=>{
         if (amHost()) return;
         receivedState = true;  // snapshot received
@@ -381,6 +427,7 @@
         renderAll();
         timerEl.textContent = fmt(Math.floor(state.timer_ms || totalBudgetMs()));
         updateConnBadge();
+        startGuestLoop();      // animate locally
       });
 
       // Presence repair (only if host existed and left)
@@ -417,6 +464,15 @@
 
       channel.on('system', { event:'channel_closed' }, ()=> setupChannel(room));
       channel.on('system', { event:'channel_error' },  ()=> setupChannel(room));
+    }
+
+    // ----- Host heartbeat (drift correction for guests) -----
+    if (!window.__djHeartbeat){
+      window.__djHeartbeat = setInterval(()=>{
+        if (amHost() && channel && isSubscribed && currentRoom === sessionId){
+          sync();    // rebroadcast every 10s
+        }
+      }, 10_000);
     }
 
     // ----- Actions -----
@@ -459,13 +515,42 @@
       const ghost = { id: crypto.randomUUID(), name:name.trim(), avatar:'spaceman', color:'#22d3ee' };
       state.participants.push(ghost); renderAll(); sync();
     };
-    $('handOverBtn').onclick = ()=> amHost()? handOver() : broadcast('handover',{});
+
+    $('handOverBtn').onclick = () => {
+      // Only host or the ACTIVE DJ can hand over
+      if (!amHost() && !isMyTurn()){
+        return toast('Only the host or the active DJ can hand over');
+      }
+      const now = Date.now();
+      const sinceTurnStart = now - (lastTurnStartMs || 0);
+      if (sinceTurnStart < 60_000 && !handoverConfirmArmed){
+        handoverConfirmArmed = true;
+        $('handOverBtn').classList.add('danger');
+        $('handOverBtn').textContent = 'Confirm Hand Over';
+        toast('Press again to confirm');
+        setTimeout(()=>{
+          if (!handoverConfirmArmed) return;
+          handoverConfirmArmed = false;
+          $('handOverBtn').classList.remove('danger');
+          $('handOverBtn').textContent = 'Hand Over';
+        }, 5000);
+        return;
+      }
+      handoverConfirmArmed = false;
+      $('handOverBtn').classList.remove('danger');
+      $('handOverBtn').textContent = 'Hand Over';
+
+      if (amHost()) handOver();
+      else broadcast('handover', {});  // active DJ (guest) can request; host executes
+    };
+
     $('stillBtn').onclick     = ()=> amHost()? extendPeriod(msPerTrack()) : null;
     $('resetBtn').onclick     = ()=> amHost()? resetTurn() : null;
     $('removeActiveBtn').onclick = ()=>{
       if (!amHost()) return;
-      const active=state.participants[state.active_index]; if (active) broadcast('remove', { id: active.id });
+      const active=state.participants[state.active_index]; if (active) hostRemoveParticipant(active.id);
     };
+
     tracksSel.onchange = (e)=>{
       const v=parseInt(e.target.value||'1',10);
       if (!amHost()) { tracksSel.value=String(state.tracks_per_turn); return toast('Host only'); }
@@ -526,8 +611,7 @@
 
       if (sessionId) { $('newSessionBtn').disabled = true; setupChannel(sessionId); }
       updateConnBadge();
-      // Optionally prompt push on load (browser may require user gesture)
-      // setupPush();
+      // setupPush(); // optional auto prompt
     })();
   </script>
 
