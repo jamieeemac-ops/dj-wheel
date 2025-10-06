@@ -243,14 +243,33 @@
       if(!sessionId) return alert("Create a session first");
       await navigator.clipboard.writeText(`${ENV.BASE_URL}/s/${sessionId}`); toast("Link copied");
     };
-    $('joinBtn').onclick = ()=>{
-      me.name = $('profileName').value.trim() || 'DJ';
-      me.avatar = $('avatarPick').value;
-      me.color = $('colorPick').value;
-      saveMe();
-      channel?.track({ ...me }); // presence update
-      // Host adds/updates roster
-      isHost() && broadcast('upsert', { ...me });
+ $('joinBtn').onclick = () => {
+  me.name = $('profileName').value.trim() || 'DJ';
+  me.avatar = $('avatarPick').value;
+  me.color = $('colorPick').value;
+  saveMe();
+
+  if (!channel) {
+    toast("Create a session first (New Session) or open a session link.");
+    return;
+  }
+
+  // everyone updates presence (safe to call multiple times)
+  channel.track({ ...me });
+
+  if (isHost()) {
+    // host updates local state then broadcasts full state
+    const i = state.participants.findIndex(p => p.id === me.id);
+    if (i >= 0) state.participants[i] = me;
+    else state.participants.push(me);
+    sync();           // sends { event: 'state', payload: state } to all
+    renderAll();
+  } else {
+    // non-host: ask host to upsert me
+    broadcast('upsert', { ...me });
+  }
+};
+
     };
     $('tracksPerTurn').onchange = (e)=> isHost() && broadcast('tpt', { v: parseInt(e.target.value||'1',10) });
     $('removeActiveBtn').onclick = ()=> isHost() && broadcast('remove', { id: state.participants[state.active_index]?.id });
