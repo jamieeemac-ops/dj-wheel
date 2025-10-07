@@ -1,8 +1,6 @@
-// src/App.tsx
 import React, { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 
-// OneSignal helpers (create these in src/lib/onesignal.ts if you haven't yet)
 import {
   initOneSignal,
   ensureSubscribed,
@@ -10,12 +8,46 @@ import {
   oneSignalDebug,
 } from "./lib/onesignal";
 
-// If you already have Supabase Auth wired, you can use your own user hook/context.
-// For now we’ll leave userId/sessionId as optional placeholders.
+// --- ClaimHostButton ---
+function ClaimHostButton({ sessionId, hostUserId, userId }: {
+  sessionId: string;
+  hostUserId: string | null;
+  userId: string | null;
+}) {
+  if (hostUserId || !userId) return null;
+
+  const onClaim = async () => {
+    const { error } = await supabase.rpc("claim_host", { p_session: sessionId });
+    if (error) console.error(error);
+  };
+
+  return <button onClick={onClaim}>Claim Host</button>;
+}
+
+// --- StartSessionButton ---
+function StartSessionButton({ sessionId, hostUserId, userId, sessionStarted }: {
+  sessionId: string;
+  hostUserId: string | null;
+  userId: string | null;
+  sessionStarted: boolean;
+}) {
+  const isHost = !!userId && userId === hostUserId;
+  if (!isHost || sessionStarted) return null;
+
+  const onStart = async () => {
+    const { error } = await supabase.rpc("start_session", { p_session: sessionId });
+    if (error) console.error(error);
+  };
+
+  return <button onClick={onStart}>Start Session</button>;
+}
+
 export default function App() {
   const [status, setStatus] = useState("Connecting to Supabase...");
+  const [session, setSession] = useState<any>(null);
+  const userId = null; // later: set this to your logged-in user's id
 
-  // 1) Supabase connectivity check (your existing logic)
+  // --- 1. Check Supabase connection ---
   useEffect(() => {
     async function checkConnection() {
       try {
@@ -29,45 +61,90 @@ export default function App() {
     checkConnection();
   }, []);
 
-  // 2) OneSignal init (runs once globally)
+  // --- 2. Load a test session (replace with real session id) ---
+  useEffect(() => {
+    async function loadSession() {
+      const { data, error } = await supabase
+        .from("sessions")
+        .select("*")
+        .limit(1)
+        .single();
+      if (!error && data) setSession(data);
+    }
+    loadSession();
+  }, []);
+
+  // --- 3. OneSignal init (global) ---
   useEffect(() => {
     (async () => {
-      const appId = import.meta.env.VITE_ONESIGNAL_APP_ID || process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
-      if (!appId) {
-        console.warn("OneSignal App ID missing (VITE_ONESIGNAL_APP_ID or NEXT_PUBLIC_ONESIGNAL_APP_ID). Skipping init.");
-        return;
-      }
+      const appId =
+        import.meta.env.VITE_ONESIGNAL_APP_ID ||
+        process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
+      if (!appId) return;
 
       await initOneSignal(appId);
+      if (!(await ensureSubscribed())) return;
 
-      // Prompt if not yet subscribed
-      const subscribed = await ensureSubscribed();
-      if (!subscribed) return;
-
-      // OPTIONAL: if you have these values available, tag for precise targeting
-      const userId: string | null = null;     // e.g. supabase.auth.getUser().data.user?.id
-      const sessionId: string | null = null;  // your current session (room) id, if relevant
-
-      if (userId && sessionId) {
-        await tagUserAndSession(userId, sessionId);
-      } else if (userId) {
-        // still useful to set external_id, even without a session tag
-        await tagUserAndSession(userId, "global");
+      if (userId && session?.id) {
+        await tagUserAndSession(userId, session.id);
+        await oneSignalDebug();
       }
-
-      await oneSignalDebug(); // logs enabled status + ids in console
     })();
-  }, []);
+  }, [session?.id, userId]);
+
+  // --- 4. Live session subscription (optional) ---
+  useEffect(() => {
+    if (!session?.id) return;
+    const ch = supabase
+      .channel(`session:${session.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "sessions",
+          filter: `id=eq.${session.id}`,
+        },
+        (payload) => setSession(payload.new)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [session?.id]);
 
   return (
     <div style={{ padding: "2rem", fontSize: "1.2rem", textAlign: "center" }}>
-      {status}
+      <p>{status}</p>
+
+      {session ? (
+        <div style={{ marginTop: "2rem" }}>
+          <h2>Session: {session.name ?? session.id}</h2>
+
+          <ClaimHostButton
+            sessionId={session.id}
+            hostUserId={session.host_user_id}
+            userId={userId}
+          />
+
+          <StartSessionButton
+            sessionId={session.id}
+            hostUserId={session.host_user_id}
+            userId={userId}
+            sessionStarted={session.session_started}
+          />
+
+          {session.session_started && (
+            <p style={{ marginTop: "1rem", color: "green" }}>
+              ✅ Session started at {session.session_start_time}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p>Loading session info...</p>
+      )}
     </div>
   );
 }
 
-    <div style={{ padding: '2rem', fontSize: '1.2rem', textAlign: 'center' }}>
-      {status}
-    </div>
-  )
-}
