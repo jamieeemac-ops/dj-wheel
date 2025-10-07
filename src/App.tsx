@@ -1,18 +1,3 @@
-// at the top of App.tsx
-import { createClient } from '@supabase/supabase-js';
-const sb = createClient(import.meta.env.VITE_SUPABASE_URL!, import.meta.env.VITE_SUPABASE_ANON_KEY!);
-
-// inside the component
-const [userId, setUserId] = useState<string | null>(null);
-useEffect(() => {
-  (async () => {
-    const { data: { user } } = await sb.auth.getUser();
-    setUserId(user?.id ?? null);
-  })();
-}, []);
-
-
-
 import React, { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 
@@ -23,8 +8,57 @@ import {
   oneSignalDebug,
 } from "./lib/onesignal";
 
+// =====================
+// Authenticated function helper (Option 2)
+// =====================
+async function sendNextDjPush({
+  userId,
+  sessionId,
+  title = "You’re up next 🎧",
+  body = "Get ready to drop your track!",
+  url,
+}: {
+  userId: string;
+  sessionId: string;
+  title?: string;
+  body?: string;
+  url?: string;
+}) {
+  // 1) get current user's access token
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) {
+    console.warn("No Supabase session: user must be signed in to call protected function");
+    return { ok: false, error: "no_session" };
+  }
+
+  // 2) call the protected Edge Function with Authorization header
+  const base = process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL!;
+  const res = await fetch(`${base}/send-next-dj`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ userId, sessionId, title, body, url }),
+  });
+
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.warn("send-next-dj failed", res.status, json);
+    return { ok: false, error: json };
+  }
+  return { ok: true, result: json };
+}
+
 // --- ClaimHostButton ---
-function ClaimHostButton({ sessionId, hostUserId, userId }: {
+function ClaimHostButton({
+  sessionId,
+  hostUserId,
+  userId,
+}: {
   sessionId: string;
   hostUserId: string | null;
   userId: string | null;
@@ -40,18 +74,27 @@ function ClaimHostButton({ sessionId, hostUserId, userId }: {
 }
 
 // --- StartSessionButton ---
-function StartSessionButton({ sessionId, hostUserId, userId, sessionStarted }: {
+function StartSessionButton({
+  sessionId,
+  hostUserId,
+  userId,
+  sessionStarted,
+  onNotifyFirst,
+}: {
   sessionId: string;
   hostUserId: string | null;
   userId: string | null;
   sessionStarted: boolean;
+  onNotifyFirst?: () => void;
 }) {
   const isHost = !!userId && userId === hostUserId;
   if (!isHost || sessionStarted) return null;
 
   const onStart = async () => {
     const { error } = await supabase.rpc("start_session", { p_session: sessionId });
-    if (error) console.error(error);
+    if (error) return console.error(error);
+    // optional: immediately notify first DJ after starting
+    if (onNotifyFirst) onNotifyFirst();
   };
 
   return <button onClick={onStart}>Start Session</button>;
@@ -60,7 +103,17 @@ function StartSessionButton({ sessionId, hostUserId, userId, sessionStarted }: {
 export default function App() {
   const [status, setStatus] = useState("Connecting to Supabase...");
   const [session, setSession] = useState<any>(null);
-  const userId = null; // later: set this to your logged-in user's id
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // --- 0. Auth: load logged-in user id (required for Option 2) ---
+  useEffect(() => {
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setUserId(user?.id ?? null);
+    })();
+  }, []);
 
   // --- 1. Check Supabase connection ---
   useEffect(() => {
@@ -76,7 +129,7 @@ export default function App() {
     checkConnection();
   }, []);
 
-  // --- 2. Load a test session (replace with real session id) ---
+  // --- 2. Load a test session (replace with real session id logic if needed) ---
   useEffect(() => {
     async function loadSession() {
       const { data, error } = await supabase
@@ -93,8 +146,8 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const appId =
-        import.meta.env.VITE_ONESIGNAL_APP_ID ||
-        process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID;
+        process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID ||
+        (import.meta as any).env?.VITE_ONESIGNAL_APP_ID;
       if (!appId) return;
 
       await initOneSignal(appId);
@@ -129,6 +182,16 @@ export default function App() {
     };
   }, [session?.id]);
 
+  // --- demo helper to notify "next DJ": here we just notify ourselves for testing ---
+  async function testNotifyMe() {
+    if (!userId || !session?.id) return;
+    await sendNextDjPush({
+      userId, // in real flow, use the *next* participant's auth user id
+      sessionId: session.id,
+      url: `${window.location.origin}/session/${session.id}`,
+    });
+  }
+
   return (
     <div style={{ padding: "2rem", fontSize: "1.2rem", textAlign: "center" }}>
       <p>{status}</p>
@@ -148,6 +211,7 @@ export default function App() {
             hostUserId={session.host_user_id}
             userId={userId}
             sessionStarted={session.session_started}
+            onNotifyFirst={testNotifyMe} // optional: ping someone at start
           />
 
           {session.session_started && (
@@ -155,6 +219,11 @@ export default function App() {
               ✅ Session started at {session.session_start_time}
             </p>
           )}
+
+          {/* Temporary test button so you can verify the authenticated call */}
+          <div style={{ marginTop: 16 }}>
+            <button onClick={testNotifyMe}>Send test authenticated push (to me)</button>
+          </div>
         </div>
       ) : (
         <p>Loading session info...</p>
