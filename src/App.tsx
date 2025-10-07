@@ -1,3 +1,18 @@
+// at the top of App.tsx
+import { createClient } from '@supabase/supabase-js';
+const sb = createClient(import.meta.env.VITE_SUPABASE_URL!, import.meta.env.VITE_SUPABASE_ANON_KEY!);
+
+// inside the component
+const [userId, setUserId] = useState<string | null>(null);
+useEffect(() => {
+  (async () => {
+    const { data: { user } } = await sb.auth.getUser();
+    setUserId(user?.id ?? null);
+  })();
+}, []);
+
+
+
 import React, { useEffect, useState } from "react";
 import { supabase } from "./supabase";
 
