@@ -35,7 +35,7 @@ export async function handler(event) {
       await supabase.from('session_stats').update({ tracks }).eq('session_id', sessionId).eq('profile_id', activeProfileId);
     });
     ttt = 0;
-    idx = (idx + 1) % parts.length;
+    idx = (idx + 1) % parts.length; 
   } else {
     ttt = ttt + 1; // within multi-track turn
   }
